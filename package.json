@@ -1,0 +1,16 @@
+{
+  "name": "grid-core",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "author": "PhilippLgh <philipp@ethereum.org>",
+  "license": "MIT",
+  "scripts": {
+    "start": "node ./dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^12.12.7"
+  },
+  "dependencies": {
+    "hapi": "^18.1.0"
+  }
+}
