@@ -5,10 +5,15 @@
   "author": "PhilippLgh <philipp@ethereum.org>",
   "license": "MIT",
   "scripts": {
-    "start": "node ./dist/index.js"
+    "start": "node ./dist/index.js",
+    "start:server": "ts-node example.ts",
+    "build": "tsc -p ./tsconfig.json"
   },
   "devDependencies": {
-    "@types/node": "^12.12.7"
+    "@types/hapi": "^18.0.3",
+    "@types/node": "^12.12.7",
+    "ts-node": "^8.5.2",
+    "typescript": "^3.7.2"
   },
   "dependencies": {
     "hapi": "^18.1.0"
