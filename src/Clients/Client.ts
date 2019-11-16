@@ -16,7 +16,10 @@ export default class Client {
     this.config = config
   }
   get name() {
-    return ''
+    return this.config.name
+  }
+  get displayName() {
+    return this.config.displayName
   }
   // we should assume that multiple 
   // instances of one client can be executed at the same time

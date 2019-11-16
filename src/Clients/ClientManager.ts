@@ -1,8 +1,8 @@
 import path from 'path'
 import fs from 'fs'
-import PluginManager from '../PluginSystem/PluginManager'
 import Client from './Client'
 import { PackageManager, IPackage } from 'ethpkg'
+import PluginManager from '../PluginSystem/PluginManager';
 
 export type ReleaseSpecifier = string
 
@@ -74,7 +74,7 @@ class ClientManager {
     return destAbs
   }
 
-  async getClient(spec? : ReleaseSpecifier) : Promise<Client> {
+  async getClient(spec? : ReleaseSpecifier, listener = (newState: string, arg: any) => {}) : Promise<Client> {
 
     // FIXME use proper caching
     let cachedBinaryPath = path.join(process.cwd(), 'temp', 'geth')
@@ -85,6 +85,7 @@ class ClientManager {
     // FIXME get client package and extract binary here
     const pkg : IPackage | undefined = await this.packageManager.getPackage('azure:gethstore', {
       listener: (newState, arg) => {
+        listener(newState, arg)
         if ('progress' in arg) {
           console.log(`download progress: ${arg.progress}%`)
         } else {
@@ -104,23 +105,16 @@ class ClientManager {
 
 }
 
-const pluginManager = new PluginManager()
-const PLUGIN_DIR = path.join(process.cwd(), 'Plugins')
-console.log('plugin dir', PLUGIN_DIR)
-// do initial scan for plugins
-// FIXME pluginManager.scan(PLUGIN_DIR)
-
 /**
  * Client Manager Factor:
  * creates a ClientManager instance based on a plugin / client name
  * @param name
  */
-export const getClientManager = async (name : string) => {
+export const getClientManager = async (name : string, pluginManager: PluginManager) => {
   // TODO await pluginManager.whenReady()
-  await pluginManager.scan(PLUGIN_DIR)
   const plugin = await pluginManager.getPlugin(name)
   if (!plugin) {
-    throw new Error('plugin not found')
+    throw new Error(`Plugin "${name}" not found`)
   }
   const { pluginExports: clientConfig } = plugin
   return new ClientManager(clientConfig)

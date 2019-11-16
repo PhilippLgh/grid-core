@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import vm from 'vm'
 
-import { createLogger, LOGLEVEL, isFile, isDir, isUrl } from '../util'
+import { createLogger, LOGLEVEL, isFile, isDir, isUrl } from '../../util'
 import IPlugin from './IPlugin';
 import { IPackage } from 'ethpkg'
 const logger = createLogger(LOGLEVEL.NORMAL)
@@ -122,7 +122,6 @@ export default class PluginManager {
         if (!plugin) continue
         plugins.push(plugin)
       } catch (error) {
-        // FIXME introduce loglevel
         if (logger.loglevel <= LOGLEVEL.NORMAL) {
           logger.warn(`Plugin "${f}" could not be loaded: `, error.message)
         } else {
@@ -164,6 +163,10 @@ export default class PluginManager {
     console.log('Initialized', plugins.length, 'plugins: ', plugins.map(p => p.name).join(', '))
 
     return plugins
+  }
+
+  async getAllPlugins() {
+    return this.plugins
   }
 
   async getPlugin(name : string) {
