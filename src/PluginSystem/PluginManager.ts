@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import vm from 'vm'
 
-import { createLogger, LOGLEVEL, isFile, isDir, isUrl } from '../../util'
+import { createLogger, LOGLEVEL, isFile, isDir, isUrl } from '../util'
 import IPlugin from './IPlugin';
 import { IPackage } from 'ethpkg'
 const logger = createLogger(LOGLEVEL.NORMAL)

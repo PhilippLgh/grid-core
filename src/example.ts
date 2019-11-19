@@ -1,5 +1,5 @@
-import Grid from './src/Grid'
-import { STATES } from './src/Clients/Client'
+import Grid from './Grid'
+import { STATES } from './Clients/Client'
 
 const grid = new Grid()
 

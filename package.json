@@ -4,9 +4,13 @@
   "main": "dist/index.js",
   "author": "PhilippLgh <philipp@ethereum.org>",
   "license": "MIT",
+  "bin": {
+    "grid": "./dist/Bin/grid.js"
+  },
   "scripts": {
     "start": "node ./dist/index.js",
     "start:server": "ts-node example.ts",
+    "cli": "node ./dist/Bin/grid.js",
     "build": "tsc -p ./tsconfig.json"
   },
   "devDependencies": {
@@ -16,6 +20,7 @@
     "typescript": "^3.7.2"
   },
   "dependencies": {
+    "clime": "^0.5.10",
     "hapi": "^18.1.0"
   }
 }
