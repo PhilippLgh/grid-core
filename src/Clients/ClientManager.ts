@@ -87,6 +87,7 @@ class ClientManager {
       listener: (newState, arg) => {
         listener(newState, arg)
         if ('progress' in arg) {
+          // TODO emit STATES.DOWNLOADING
           console.log(`download progress: ${arg.progress}%`)
         } else {
           console.log(newState)
@@ -97,6 +98,7 @@ class ClientManager {
       throw new Error('Could not fetch the package')
     }
     console.log('start extracting binary')
+    // TODO emit STATES.EXTRACTING
     const binaryPath = await this.extractBinary(pkg)
     console.log('binary extracted', binaryPath)
 
