@@ -29,14 +29,18 @@ export default class Client {
   get version() {
     return ''
   }
-  get resolveIpc() {
+  private get resolveIpc() {
     return this.config.resolveIpc
   }
   async init() {
     return true
   }
-  async start(flags = []) : Promise<ControlledProcess> {
-    console.log('start binary', this.binaryPath)
+
+  /**
+   * The promise resolves with a client in *CONNECTED* state
+   * @param flags 
+   */
+  async start(flags = []) : Promise<string | undefined> {
     try {
       this.process = new ControlledProcess(
         this.binaryPath,
@@ -49,7 +53,7 @@ export default class Client {
       console.log(`Plugin Start Error: ${error}`)
       throw new Error(`Plugin Start Error: ${error}`)
     }
-    return this.process
+    return this.process.ipcPath
   }
 
   async stop() {
@@ -93,10 +97,10 @@ export default class Client {
     })
   }
 
-  async stateChangedTo(newState : string) {
+  async stateChangedTo(newState : string, timeout?: number) {
     if(!this.process) {
       return new Promise((resolve, reject) => {
-      
+        // FIXME 
       })
     }
     // TODO does CONNECTED also mean STARTED? -> probably yes

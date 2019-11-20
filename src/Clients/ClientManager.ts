@@ -6,6 +6,13 @@ import PluginManager from '../PluginSystem/PluginManager';
 
 export type ReleaseSpecifier = string
 
+export type StateListener = (newState: string, arg: any) => void
+
+interface FetchClientOptions {
+  spec? : ReleaseSpecifier,
+  listener?: StateListener 
+}
+
 class ClientManager {
 
   config: any
@@ -21,8 +28,8 @@ class ClientManager {
     return this.config.binaryName
   }
 
-  async listClients() {
-
+  async getAllClients() {
+    return this.packageManager.listPackages('azure:gethstore')
   }
 
   private async extractBinary(pkg : IPackage) {
@@ -74,7 +81,10 @@ class ClientManager {
     return destAbs
   }
 
-  async getClient(spec? : ReleaseSpecifier, listener = (newState: string, arg: any) => {}) : Promise<Client> {
+  async getClient({
+    spec = 'latest', 
+    listener = (newState: string, arg: any) => undefined
+  } : FetchClientOptions = {}) : Promise<Client> {
 
     // FIXME use proper caching
     let cachedBinaryPath = path.join(process.cwd(), 'temp', 'geth')
@@ -82,8 +92,10 @@ class ClientManager {
       return new Client(cachedBinaryPath, this.config)
     }
 
+    // FIXME use spec to fetch correct client
     // FIXME get client package and extract binary here
-    const pkg : IPackage | undefined = await this.packageManager.getPackage('azure:gethstore', {
+    const pkg : IPackage | undefined = await this.packageManager.getPackage({
+      spec: 'azure:gethstore',
       listener: (newState, arg) => {
         listener(newState, arg)
         if ('progress' in arg) {
