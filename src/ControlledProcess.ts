@@ -105,43 +105,29 @@ class ControlledProcess extends EventEmitter {
         }
       }
 
-      const onStart = () => {
+      const onStart = async () => {
         if (hasFiredOnStart) {
           return
         }
         hasFiredOnStart = true
         this.state = STATES.STARTED
         // Check for and connect IPC in 1s
-        setTimeout(async () => {
-          try {
-            if (this.resolveIpc) {
-              /* FIXME
-              // Recheck in 3s
-              setTimeout(() => {
-                debug('IPC endpoint not found, rechecking in 3s...')
-                this.connectIpc(onConnect)
-              }, 3000)
-              */
-              this.ipcPath = this.resolveIpc(this.logs)
-            }
-            if (this.ipcPath) {
-              console.log('Connecting to IPC at', this.ipcPath)
-              const state = await this.connectIPC(this.ipcPath)
-              if (state === STATES.CONNECTED) {
-                resolve(this)
-              }
-            } else {
-              // throw new Error('Could not resolve IPC path.')
-              // FIXED: ipfs app won't start if ipfs is started as daemon which will work even without ipc
-              this.debug(
-                `Failed to establish ipc connection: 'Could not resolve IPC path.'`
-              )
-              resolve(this)
-            }
-          } catch (error) {
-            this.debug(`Failed to establish ipc connection: ${error.message}`)
+        const ipcPath = await this.tryResolveIpc()
+        this.ipcPath = ipcPath
+        if (this.ipcPath) {
+          console.log('Connecting to IPC at', this.ipcPath)
+          const state = await this.connectIPC(this.ipcPath)
+          if (state === STATES.CONNECTED) {
+            resolve(this)
           }
-        }, 3000) // FIXME require long timeouts in tests - better solution?
+        } else {
+          // throw new Error('Could not resolve IPC path.')
+          // FIXED: ipfs app won't start if ipfs is started as daemon which will work even without ipc
+          this.debug(
+            `Failed to establish ipc connection: 'Could not resolve IPC path.'`
+          )
+          resolve(this)
+        }
       }
 
       const onData = (data: any) => {
@@ -196,6 +182,21 @@ class ControlledProcess extends EventEmitter {
       this.process.on('error', onProcError.bind(this))
       this.process.kill('SIGINT')
       // this.ipcPath = null
+    })
+  }
+  private tryResolveIpc() : Promise<string> {
+    return new Promise((resolve, reject) => {
+      // TODO we could use set interval instead for faster feedback
+      setTimeout(async () => {
+        try {
+          if (this.resolveIpc) {
+            return resolve(this.resolveIpc(this.logs))
+          }
+        } catch (error) {
+          this.debug(`Failed to establish ipc connection: ${error.message}`)
+          reject(error)
+        }
+      }, 3000) // FIXME require long timeouts in tests - better solution?
     })
   }
   // tries to establish and IPC connection to the spawned process
