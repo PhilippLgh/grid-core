@@ -55,6 +55,7 @@ export async function start(grid: Grid) {
   
   try {
     await server.start()
+    return server.info.uri
   }
   catch (err) {
     console.log(err)

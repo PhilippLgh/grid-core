@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node ./dist/index.js",
-    "start:server": "ts-node example.ts",
+    "start:server": "ts-node src/example.ts",
     "cli": "node ./dist/Bin/grid.js",
     "build": "tsc -p ./tsconfig.json"
   },
@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "clime": "^0.5.10",
-    "hapi": "^18.1.0"
+    "hapi": "^18.1.0",
+    "pirates": "^4.0.1"
   }
 }
