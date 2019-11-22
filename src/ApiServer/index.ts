@@ -25,35 +25,29 @@ export async function start(grid: Grid) {
     },
     handler: async (request: any, h: any) => {
       const { payload, headers, info, query } = request
-      // console.log('params', payload, info, query)
-      const clientManagers = await grid.getAllClientManagers()
-      return clientManagers
-    }
-  })
-
-  // Add the route  
-  server.route({
-    method: 'GET',
-    path: '/geth/start',
-    handler: async (request: any, h: any) => {
-      // this will try to create a client manager from a plugin
-      // plugin might need to be fetched
-      const clientManager = await grid.getClientManager('geth')
-      // this will find latest geth release on azure
-      // download package
-      // check plugin to find binary in package
-      // extract binary from package and write to disk
-      const geth = await clientManager.getClient()
-      if (!geth) return 'not found'
-      // this will spawn a new geth process with a plugin-defined
-      // default config
-      const clientId = await geth.start()
-      // return a unique clientId for further communication
-      return 'whatever' // TODO clientID
+      const { method, params, id } = payload
+      console.log(method, params, id)
+      // @ts-ignore
+      if (typeof grid[method] === 'function') {
+        // @ts-ignore
+        const result = await grid[method]()
+        /*
+        const publicProperties = Object.getOwnPropertyNames(result).filter(name => !name.startsWith('_'))
+        const publicMethods = Object.getPrototypeOf(result).filter((name: string) => !name.startsWith('_'))
+        const copy = publicProperties.reduce((acc, key) => {
+          acc[key] = instance[key];
+          return acc;
+        }, {})
+        */
+        return result
+      }
     }
   })
   
   try {
+    // do first plugin scan
+    await grid.whenReady()
+
     await server.start()
     return server.info.uri
   }
