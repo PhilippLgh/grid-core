@@ -1,36 +1,75 @@
 import path from 'path'
+import { EventEmitter } from 'events'
 import PluginManager from './PluginSystem/PluginManager'
-
-import { getClientManager, StateListener } from './Clients/ClientManager'
-import { start } from './ApiServer';
+import { StateListener, ClientManager } from './Clients/ClientManager'
+import { start } from './ApiServer'
 
 const PLUGIN_DIR = path.join(process.cwd(), 'Plugins')
 
-export default class Grid {
+export default class Grid extends EventEmitter {
   pluginManager: PluginManager;
-
+  clientManagers: Array<ClientManager>;
+  isReady: boolean;
   constructor(){
+    super()
     this.pluginManager = new PluginManager()
-    // do initial scan for plugins
-    // FIXME pluginManager.scan(PLUGIN_DIR)
+    this.clientManagers = []
+    this.isReady = false
+    this.init()
   }
-  async pluginsReady() {
+  // should only be called one -> private
+  private async init() {
     await this.pluginManager.scan(PLUGIN_DIR)
-    return true
+    const plugins = await this.pluginManager.getAllPlugins()
+    // initialize client managers
+    this.clientManagers = plugins.map(plugin => {
+      const { pluginExports: config } = plugin
+      return new ClientManager(config)
+    })
+    this.isReady = true
+    this.emit('ready')
   }
+  whenReady(timeout?: number) {
+    if (this.isReady) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      this.once('ready', resolve)
+    })
+  }
+  /**
+   * returns the list of all evaluated plugin exports
+   * i.e. the configuration they produce when run on this machine
+   */
   async getAllPlugins() {
     return this.pluginManager.getAllPlugins()
   }
+  /**
+   * return the list of client managers i.e.
+   * wrapped plugins that specify how to fetch and configure eth binaries
+   */
   async getAllClientManagers() {
-    return await this.pluginManager.plugins // TODO filter by plugin type
+    return this.clientManagers
   }
   async getClientManager(name : string) {
-    return getClientManager(name, this.pluginManager)
+    return this.clientManagers.find(c => c.name === name)
   }
-  async getClient(clientName: string, listener?: StateListener) {
-    await this.pluginsReady()
+  /**
+   * returns a list of **all** clients independent of client managers
+   * clients refer to binary+config and a state [running, connected] 
+   */
+  async getAllClients() {
+    const clientManagers = await this.getAllClientManagers()
+    const clients = []
+    for (const clientManager of clientManagers) {
+      const _clients = await clientManager.getAllClients()
+      clients.push(..._clients)
+    }
+    return clients
+  }
+  async getClient(clientName: string, spec = 'latest', listener?: StateListener) {
     const clientManager = await this.getClientManager(clientName)
+    if (!clientManager) throw new Error('No plugin / client manager found for:'+clientName)
     const client = await clientManager.getClient({
+      spec,
       listener
     })
     return client

@@ -2,7 +2,8 @@ import path from 'path'
 import fs from 'fs'
 import Client from './Client'
 import { PackageManager, IPackage } from 'ethpkg'
-import PluginManager from '../PluginSystem/PluginManager';
+import PluginManager from '../PluginSystem/PluginManager'
+import { uuid } from '../util'
 
 export type ReleaseSpecifier = string
 
@@ -13,23 +14,37 @@ interface FetchClientOptions {
   listener?: StateListener 
 }
 
-class ClientManager {
+export class ClientManager {
 
-  config: any
-  packageManager: PackageManager
+  private _config: any
+  private _packageManager: PackageManager
+  id: string
 
   constructor(config: any) {
-    this.config = config
+    this._config = config
     const { name, repository, filter, prefix } = config
-    this.packageManager = new PackageManager()
+    this._packageManager = new PackageManager()
+    this.id = uuid()
+  }
+
+  get name() {
+    return this._config.name
   }
 
   get binaryName() {
-    return this.config.binaryName
+    return this._config.binaryName
+  }
+
+  get description() {
+    return this._config.about && this._config.about.description
+  }
+
+  async getVersions() {
+    return this._packageManager.listPackages('azure:gethstore')
   }
 
   async getAllClients() {
-    return this.packageManager.listPackages('azure:gethstore')
+    return <Array<Client>>[]
   }
 
   private async extractBinary(pkg : IPackage) {
@@ -89,12 +104,12 @@ class ClientManager {
     // FIXME use proper caching
     let cachedBinaryPath = path.join(process.cwd(), 'temp', 'geth')
     if (fs.existsSync(cachedBinaryPath)) {
-      return new Client(cachedBinaryPath, this.config)
+      return new Client(cachedBinaryPath, this._config)
     }
 
     // FIXME use spec to fetch correct client
     // FIXME get client package and extract binary here
-    const pkg : IPackage | undefined = await this.packageManager.getPackage({
+    const pkg : IPackage | undefined = await this._packageManager.getPackage({
       spec: 'azure:gethstore',
       listener: (newState, arg) => {
         listener(newState, arg)
@@ -112,16 +127,18 @@ class ClientManager {
     const binaryPath = await this.extractBinary(pkg)
     console.log('binary extracted', binaryPath)
 
-    return new Client(binaryPath, this.config)
+    return new Client(binaryPath, this._config)
   }
 
 }
 
+/*
+Client Managers are stateful and have uuids they should not be created on the fly
 /**
  * Client Manager Factor:
  * creates a ClientManager instance based on a plugin / client name
  * @param name
- */
+ /
 export const getClientManager = async (name : string, pluginManager: PluginManager) => {
   // TODO await pluginManager.whenReady()
   const plugin = await pluginManager.getPlugin(name)
@@ -131,3 +148,4 @@ export const getClientManager = async (name : string, pluginManager: PluginManag
   const { pluginExports: clientConfig } = plugin
   return new ClientManager(clientConfig)
 }
+*/
