@@ -1,4 +1,5 @@
 import fs from 'fs'
+import crypto from 'crypto'
 
 export const LOGLEVEL = {
   WARN: -1,
@@ -87,4 +88,8 @@ export const isUrl = async (str: string) => {
     return true;
   }
   return false;
+}
+
+export const uuid = () => {
+  return crypto.randomBytes(3*4).toString('base64')
 }
