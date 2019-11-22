@@ -9,6 +9,7 @@ const startApi = async () => {
 }
 
 const runGeth = async () => {
+  /* deprecated:
   // creates a ClientManager instance from a plugin
   const gethManager = await grid.getClientManager('geth')
   // fetches release info, finds latest, downloads and extracts binary if necessary
@@ -20,6 +21,7 @@ const runGeth = async () => {
   // calls Geth's RPC server
   const result = await geth.rpc('--version')
   console.log(`result of --version: ${result}`)
+  */
 }
 
 startApi()
