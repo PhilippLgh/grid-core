@@ -1,10 +1,12 @@
 import path from 'path'
 import { EventEmitter } from 'events'
 import PluginManager from './PluginSystem/PluginManager'
-import { StateListener, ClientManager } from './Clients/ClientManager'
+import { StateListener, ClientManager, CLIENT_FETCH_STATES } from './Clients/ClientManager'
 import { start } from './ApiServer'
 
 const PLUGIN_DIR = path.join(process.cwd(), 'Plugins')
+
+export { CLIENT_FETCH_STATES }
 
 export default class Grid extends EventEmitter {
   pluginManager: PluginManager;
@@ -65,9 +67,15 @@ export default class Grid extends EventEmitter {
     }
     return clients
   }
-  async getClient(clientName: string, spec = 'latest', listener?: StateListener) {
+  async getClient(clientName: string, options : any = {}) {
+    options = options
+    const spec = options.spec || 'latest'
+    const listener = options.listener || undefined
     const clientManager = await this.getClientManager(clientName)
-    if (!clientManager) throw new Error('No plugin / client manager found for:'+clientName)
+    if (!clientManager) {
+      const available = await this.getAllClientManagers()
+      throw new Error(`Client "${clientName}" is not supported or found. Try adding a plugin. Available plugins: ${available.map(r => r.name)}`)
+    }
     const client = await clientManager.getClient({
       spec,
       listener
