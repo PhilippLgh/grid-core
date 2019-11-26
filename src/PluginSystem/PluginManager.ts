@@ -133,8 +133,6 @@ export default class PluginManager {
     return plugins
   }
   async scan(...pluginSources: Array<string>) {
-    console.log('scan plugin sources', pluginSources)
-
     let plugins : Array<IPlugin> = []
     for (const pluginSource of pluginSources) {
       try {
@@ -160,7 +158,7 @@ export default class PluginManager {
 
     this.plugins = plugins
 
-    console.log('Initialized', plugins.length, 'plugins: ', plugins.map(p => p.name).join(', '))
+    console.log('Initialized', plugins.length, 'plugins:', plugins.map(p => p.name).join(', '))
 
     return plugins
   }
