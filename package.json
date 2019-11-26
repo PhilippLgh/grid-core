@@ -14,14 +14,19 @@
     "build": "tsc -p ./tsconfig.json"
   },
   "devDependencies": {
+    "@types/cli-table": "^0.3.0",
     "@types/hapi": "^18.0.3",
     "@types/node": "^12.12.7",
     "ts-node": "^8.5.2",
     "typescript": "^3.7.2"
   },
   "dependencies": {
+    "chalk": "^3.0.0",
+    "cli-table": "^0.3.1",
     "clime": "^0.5.10",
+    "ethers": "^4.0.40",
     "hapi": "^18.1.0",
+    "ora": "^4.0.3",
     "pirates": "^4.0.1"
   }
 }
