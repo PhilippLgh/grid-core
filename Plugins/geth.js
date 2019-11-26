@@ -47,7 +47,7 @@ module.exports = {
   order: 1,
   displayName: 'Geth',
   name: 'geth',
-  repository: 'https://gethstore.blob.core.windows.net',
+  repository: 'azure:gethstore',
   modifiers: {
     version: ({ version }) =>
       version
