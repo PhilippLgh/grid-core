@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 import crypto from 'crypto'
 
 export const LOGLEVEL = {
@@ -92,4 +93,40 @@ export const isUrl = async (str: string) => {
 
 export const uuid = () => {
   return crypto.randomBytes(3*4).toString('base64')
+}
+
+export const resolveRuntimeDependency = (runtimeDependency : any = {}) => {
+  const { name, version, type } = runtimeDependency
+  if (name === 'Java') {
+    if ('JAVA_HOME' in process.env) {
+      const JAVA_HOME = process.env['JAVA_HOME']
+      if (!JAVA_HOME) {
+        return undefined
+      }
+      const JAVA_BIN = path.join(
+        JAVA_HOME,
+        'bin',
+        process.platform === 'win32' ? 'java.exe' : 'java'
+      )
+      return fs.existsSync(JAVA_BIN) ? JAVA_BIN : undefined
+    } else {
+      // MAC:
+      if (process.platform === 'darwin') {
+        if (fs.existsSync('/Library/Java/JavaVirtualMachines/')) {
+          const vms = fs.readdirSync('/Library/Java/JavaVirtualMachines/')
+          // /Contents/Home/bin/java
+          // console.log('found vms', vms)
+        }
+        // alternative tests
+        // /usr/bin/java
+        // /usr/libexec/java_home -V
+        // execute 'which java'
+        const javaPath = '/usr/bin/java'
+        return fs.existsSync(javaPath) ? javaPath : undefined
+      }
+      // console.log(process.env.PATH.includes('java'))
+    }
+    return undefined
+  }
+  return undefined
 }
