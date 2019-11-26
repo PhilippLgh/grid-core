@@ -77,10 +77,13 @@ class ControlledProcess extends EventEmitter {
 
       // Add start cmd to logs
       const cmd = `${this.binaryPath} ${flags.join(' ')}`
+      // console.log('Start command: ', cmd)
       this.logs.push(cmd)
 
       // Spawn process
-      const proc = spawn(this.binaryPath, flags)
+      const proc = spawn(this.binaryPath, flags, {
+        detached: false // Prepare child to run independently of its parent process.
+      })
       const { stdout, stderr, stdin } = proc
       this.process = proc
       this.stdin = stdin
@@ -184,7 +187,10 @@ class ControlledProcess extends EventEmitter {
       // this.ipcPath = null
     })
   }
-  private tryResolveIpc() : Promise<string> {
+  private tryResolveIpc() : Promise<string | undefined> {
+    if (!this.resolveIpc) {
+      return Promise.resolve(undefined)
+    }
     return new Promise((resolve, reject) => {
       // TODO we could use set interval instead for faster feedback
       setTimeout(async () => {
