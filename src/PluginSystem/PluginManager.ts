@@ -1,4 +1,4 @@
-import fs from 'fs'
+import { promises as fs } from 'fs'
 import path from 'path'
 import vm from 'vm'
 
@@ -9,8 +9,10 @@ const logger = createLogger(LOGLEVEL.NORMAL)
 
 export default class PluginManager {
   plugins: Array<IPlugin>
-  constructor(){
+  createContext: any;
+  constructor(createContext: Function){
     this.plugins = []
+    this.createContext = createContext
   }
   private async loadPluginFromSource(source: string) : Promise<IPlugin> {
     // FIXME temp fix for clef plugin
@@ -19,22 +21,17 @@ export default class PluginManager {
      * Note that running untrusted code is a tricky business requiring great care. 
      * To prevent accidental global variable leakage, vm.runInNewContext is quite useful, but safely running untrusted code requires a separate process.
      */
-    const sandbox = {
-      module: { exports: {} }, // plugins want to use module for exports
-      process: {
-        platform: process.platform,
-        env: {
-          APPDATA: process.env.APPDATA
-        },
-      }
-    }
+    const sandbox = this.createContext()
+
     const result = vm.runInNewContext(source, sandbox)
     const { exports: pluginExports } = sandbox.module
     // TODO validate / verify
     if (pluginExports === undefined) {
       throw new Error('Plugin has no exports')
     }
-    // @ts-ignore
+    if (!('name' in pluginExports)) {
+      throw new Error('Plugin has no name')
+    }
     const { name } = pluginExports
     return {
       name,
@@ -43,7 +40,7 @@ export default class PluginManager {
     }
   }
   private async loadPluginFromFile(fullPath : string) : Promise<IPlugin> {
-    const source = fs.readFileSync(fullPath, 'utf8')
+    const source = await fs.readFile(fullPath, 'utf8')
     // const pluginConfig = require(fullPath)
     return this.loadPluginFromSource(source)
   }
@@ -104,7 +101,7 @@ export default class PluginManager {
     throw new Error('not implemented')
   }
   private async scanDir(pluginDir: string) : Promise<Array<IPlugin>> {
-    const pluginFiles = fs.readdirSync(pluginDir)
+    const pluginFiles = await fs.readdir(pluginDir)
     const plugins : Array<IPlugin> = []
     // if directory contains index.js treat as single plugin directory
     let index = pluginFiles.find((f: string) => f.endsWith('index.js'))
@@ -157,8 +154,6 @@ export default class PluginManager {
     }
 
     this.plugins = plugins
-
-    console.log('Initialized', plugins.length, 'plugins:', plugins.map(p => p.name).join(', '))
 
     return plugins
   }
