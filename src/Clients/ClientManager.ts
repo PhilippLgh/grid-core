@@ -36,13 +36,30 @@ export const CLIENT_FETCH_STATES = {
 
 }
 
+export interface ClientManagerConfig {
+  name: string;
+  repository: string;
+  filter?: {
+    name: {
+      includes?: Array<string>;
+      exclude?: Array<string>;
+    }
+  };
+  prefix: string;
+  binaryName?: string;
+  unpack: boolean;
+  about?: {
+    description?: string;
+  };
+}
+
 export class ClientManager {
 
-  private _config: any
+  private _config: ClientManagerConfig
   private _packageManager: PackageManager
   id: string
 
-  constructor(config: any) {
+  constructor(config: ClientManagerConfig) {
     this._config = config
     const { name, repository, filter, prefix } = config
     this._packageManager = new PackageManager()
