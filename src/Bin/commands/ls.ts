@@ -15,7 +15,6 @@ export default class extends Command {
     clientName: string
   ) {
     const grid = new Grid()
-    await grid.whenReady()
     const clientManager = await grid.getClientManager(clientName)
     if (!clientManager) {
       console.log('client manager / plugin not found')

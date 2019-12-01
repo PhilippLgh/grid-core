@@ -17,7 +17,6 @@ export default class extends Command {
     clientName: string
   ) {
     const grid = new Grid()
-    await grid.whenReady()
     const client = await grid.getClient(clientName, {
       listener: printFetchStateToCLI(clientName)
     })

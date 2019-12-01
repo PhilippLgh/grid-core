@@ -56,7 +56,6 @@ export default class extends Command {
     
     // this instance will also be available in repl
     const grid = new Grid()
-    await grid.whenReady()
 
     if (client) {
       console.log('Preparing client:', client)
