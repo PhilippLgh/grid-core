@@ -1,8 +1,11 @@
+const TYPE = require('grid-core/constants/plugin_types')
+
 module.exports = {
   name: 'besu',
   displayName: 'Besu',
   type: 'client',
   repository: 'bintray:hyperledger-org/besu-repo/besu',
+  type: TYPE.CLIENT,
   filter: {
     name: {
       includes: ['.tar.gz'],
