@@ -19,8 +19,11 @@ export default class Workflow implements ISerializable {
     return this.plugin.tags || []
   }
 
-  async run(config?: any) {
+  get exports() {
+    return this.plugin.exports
+  }
 
+  async run(config?: any) {
     if (!this.plugin.run) {
       //await _default.run(config)
     } else {

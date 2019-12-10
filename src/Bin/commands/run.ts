@@ -1,5 +1,5 @@
 import { Command, command, param, Options, option } from 'clime'
-import Grid, { CLIENT_FETCH_STATES } from '../../Grid'
+import Grid from '../../Grid'
 import path from 'path'
 import { printFetchStateToCLI, replaceAll } from '../cli-utils'
 import chalk from 'chalk'
