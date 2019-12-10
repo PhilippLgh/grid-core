@@ -11,7 +11,7 @@ export async function start(grid: Grid) {
   // @ts-ignore
   const server = Hapi.server({
     host: 'localhost',
-    port: 8081
+    port: 4743 // 4743 -> grid t9 : might clash with openhpi
   })
 
   server.route({
@@ -45,9 +45,6 @@ export async function start(grid: Grid) {
   })
   
   try {
-    // do first plugin scan
-    await grid.whenReady()
-
     await server.start()
     return server.info.uri
   }

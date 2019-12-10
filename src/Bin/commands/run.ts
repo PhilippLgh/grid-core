@@ -1,5 +1,5 @@
 import { Command, command, param, Options, option } from 'clime'
-import Grid, { CLIENT_FETCH_STATES } from '../../Grid'
+import Grid from '../../Grid'
 import path from 'path'
 import { printFetchStateToCLI, replaceAll } from '../cli-utils'
 import chalk from 'chalk'
@@ -17,7 +17,6 @@ export default class extends Command {
     clientName: string
   ) {
     const grid = new Grid()
-    await grid.whenReady()
     const client = await grid.getClient(clientName, {
       listener: printFetchStateToCLI(clientName)
     })

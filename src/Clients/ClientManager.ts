@@ -4,45 +4,47 @@ import Client from './Client'
 import { PackageManager, IPackage } from 'ethpkg'
 import { uuid, resolveRuntimeDependency } from '../util'
 import { IRelease } from 'ethpkg/dist/Fetcher/IRepository'
+import { INIT_CLIENT_EVENTS } from './InitClientEvents'
+
+export { INIT_CLIENT_EVENTS }
 
 export type ReleaseSpecifier = string
 
-export type StateListener = (newState: string, arg: any) => void
+export type StateListener = (newState: string, arg: any) => undefined | void
 
 type FilterFunction = (release: IRelease) => boolean
 
-interface FetchClientOptions {
+export interface FetchClientOptions {
   spec? : ReleaseSpecifier,
   listener?: StateListener 
 }
 
-export const CLIENT_FETCH_STATES = {
-  RESOLVE_VERSION_STARTED: 'resolve_package_start',
-  RESOLVE_VERSION_FINISHED: 'resolve_package_finished',
-  DOWNLOAD_STARTED: 'download_started',
-  DOWNLOAD_PROGRESS: 'download_progress',
-  DOWNLOAD_FINISHED: 'download_finished',
-  VERIFICATION_ERROR: 'verification_error',
-  VERIFICATION_FAILED: 'verification_failed',
-  PACKAGE_WRITTEN: 'package_written',
-  BINARY_EXTRACTED: 'binary_extracted',
 
-  PACKAGE_EXTRACTION_STARTED: 'PACKAGE_EXTRACTION_STARTED',
-  PACKAGE_EXTRACTION_PROGRESS: 'PACKAGE_EXTRACTION_PROGRESS',
-  PACKAGE_EXTRACTION_FINISHED: 'PACKAGE_EXTRACTION_FINISHED',
-
-  RESOLVE_DEPENDENCIES_STARTED: 'RESOLVE_DEPENDENCIES_STARTED',
-  RESOLVE_DEPENDENCIES_FINISHED: 'RESOLVE_DEPENDENCIES_FINISHED',
-
+export interface ClientManagerConfig {
+  name: string;
+  repository: string;
+  filter?: {
+    name: {
+      includes?: Array<string>;
+      exclude?: Array<string>;
+    }
+  };
+  prefix?: string;
+  binaryName?: string;
+  unpack?: boolean;
+  about?: {
+    description?: string;
+  };
+  cachePath?: string; // this is set by Grid not by the plugin
 }
 
 export class ClientManager {
 
-  private _config: any
+  protected _config: ClientManagerConfig
   private _packageManager: PackageManager
   id: string
 
-  constructor(config: any) {
+  constructor(config: ClientManagerConfig) {
     this._config = config
     const { name, repository, filter, prefix } = config
     this._packageManager = new PackageManager()
@@ -55,6 +57,10 @@ export class ClientManager {
 
   get binaryName() {
     return this._config.binaryName
+  }
+
+  get cachePath() {
+    return this._config.cachePath as string
   }
 
   get description() {
@@ -140,6 +146,7 @@ export class ClientManager {
     }
 
     // FIXME use proper caching here
+    // FIXME use content addressing here
     const destAbs = path.join(destPath, binaryName) //path.join(this.cacheDir, binaryName)
     // The unlinking might fail if the binary is e.g. being used by another instance
     if (fs.existsSync(destAbs)) {
@@ -157,17 +164,12 @@ export class ClientManager {
     return destAbs
   }
 
-  async getClient({
-    spec = 'latest', 
-    listener = (newState: string, arg: any) => undefined
-  } : FetchClientOptions = {}) : Promise<Client> {
-
+  // TODO make private
+  async getBinaries(
+    cacheDir: string,
+    listener: StateListener,
+  ) {
     const repo = this.repository
-    
-    const TEMP = path.join(process.cwd(), 'grid_temp')
-    if (!fs.existsSync(TEMP)) {
-      fs.mkdirSync(TEMP)
-    }
 
     // FIXME get client package and extract binary here
     const filter = this.filter ? this.createFilter(this.filter) : undefined
@@ -175,7 +177,7 @@ export class ClientManager {
       spec: `${repo}`,
       listener,
       filter,
-      cache: TEMP
+      cache: cacheDir
     })
     if (!pkg) {
       throw new Error('Could not fetch the package')
@@ -183,43 +185,55 @@ export class ClientManager {
     if (pkg.metadata) {
       // TODO fire listener
       const { fileName } = pkg.metadata
-      let cachedBinaryPath = path.join(TEMP, fileName)
+      let cachedBinaryPath = path.join(cacheDir, fileName)
       // reading and writing to same file can cause issues -> don't attempt overwrite of cached data
       if (!fs.existsSync(cachedBinaryPath)) {
         await pkg.writePackage(cachedBinaryPath)
       }
     }
 
+    return pkg
+  }
+
+  async getClient({
+    spec = 'latest', 
+    listener = (newState: string, arg: any) => undefined
+  } : FetchClientOptions = {}) : Promise<Client> {
+
+    const cache = this.cachePath
+    const pkg = await this.getBinaries(cache, listener)
+
     if (this.unpack) {
 
       // FIXME this is not always correct: "name" not always the the package content name
       let name = pkg.metadata && pkg.metadata.name
-      let packagePath : string | undefined = name ? path.join(TEMP, name) : undefined
+      let packagePath : string | undefined = name ? path.join(cache, name) : undefined
       if (!packagePath || !fs.existsSync(packagePath)) {
         packagePath = undefined
         // client needs to be unpacked
-        listener(CLIENT_FETCH_STATES.PACKAGE_EXTRACTION_STARTED, {})
-        packagePath = await pkg.extract(TEMP, (progress : number, file: string) => {
-          listener(CLIENT_FETCH_STATES.PACKAGE_EXTRACTION_PROGRESS, {
+        listener(INIT_CLIENT_EVENTS.PACKAGE_EXTRACTION_STARTED, {})
+        packagePath = await pkg.extract(cache, (progress : number, file: string) => {
+          listener(INIT_CLIENT_EVENTS.PACKAGE_EXTRACTION_PROGRESS, {
             progress,
             file
           })
         })
-        listener(CLIENT_FETCH_STATES.PACKAGE_EXTRACTION_FINISHED, { packageContentsPath: packagePath })
+        listener(INIT_CLIENT_EVENTS.PACKAGE_EXTRACTION_FINISHED, { packageContentsPath: packagePath })
       }
 
-      listener(CLIENT_FETCH_STATES.RESOLVE_DEPENDENCIES_STARTED, {})
+      listener(INIT_CLIENT_EVENTS.RESOLVE_DEPENDENCIES_STARTED, {})
+      // FIXME support other runtimes as well
       const JAVA_PATH = await resolveRuntimeDependency({
         name: 'Java'
       })
-      listener(CLIENT_FETCH_STATES.RESOLVE_DEPENDENCIES_FINISHED, {})
+      listener(INIT_CLIENT_EVENTS.RESOLVE_DEPENDENCIES_FINISHED, {})
 
       const binaryPath = JAVA_PATH
       return new Client(binaryPath, this._config, packagePath)
     } else {
-      console.log('start extracting binary')
-      const binaryPath = await this.extractBinary(pkg, TEMP)
-      console.log('binary extracted', binaryPath)
+      listener(INIT_CLIENT_EVENTS.BINARY_EXTRACTION_STARTED, {})
+      const binaryPath = await this.extractBinary(pkg, cache)
+      listener(INIT_CLIENT_EVENTS.BINARY_EXTRACTION_FINISHED, { binaryPath })
       return new Client(binaryPath, this._config)
     }
   }

@@ -86,7 +86,7 @@ export default class Client extends EventEmitter {
     START = replaceAll(START, '$DEFAULT_JVM_OPTS', DEFAULT_JVM_OPTS)
      */
     // FIXME we need better logic for initial flags
-    const PACKAGE_PATH = this.packagePath
+    const PACKAGE_PATH = this.packagePath || ''
     let flags = this.name === 'besu' ? [
       '-Dvertx.disableFileCPResolving',
       '-Dbesu.home=$PACKAGE_PATH',

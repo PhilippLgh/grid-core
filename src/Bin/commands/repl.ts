@@ -7,6 +7,8 @@ import Grid from '../../Grid'
 import { printFetchStateToCLI } from '../cli-utils'
 import chalk from 'chalk'
 import { ethers } from 'ethers'
+import { sleep } from '../../poc'
+import { INIT_CLIENT_EVENTS } from '../../Clients/ClientManager'
 
 
 export class ReplOptions extends Options {
@@ -35,7 +37,7 @@ export default class extends Command {
     options: ReplOptions
   ) {
 
-    const { client, modules } = options
+    let { client, modules } = options
 
     let clientsCtx : StringMap = {}
 
@@ -56,25 +58,60 @@ export default class extends Command {
     
     // this instance will also be available in repl
     const grid = new Grid()
-    await grid.whenReady()
 
     if (client) {
       console.log('Preparing client:', client)
+      const listener = printFetchStateToCLI(client)
+      listener(INIT_CLIENT_EVENTS.CLIENT_INIT_STARTED, { name: client })
 
-      const _client = await grid.getClient(client, {
-        listener: printFetchStateToCLI(client)
-      })
+      let _client
+      if (client === 'ewasm') {
+        const workflow = await grid.getWorkflow(client)
+        const { getClient } = workflow.exports
+        _client = await getClient({
+          listener
+        })
+      } else {
+        _client = await grid.getClient(client, {
+          listener
+        })
+      }
 
+      let flags : Array<string> = []
       // FIXME support flags based on workflows
-      const geth_flags = ['--dev', '--rpc', '--rpccorsdomain', 'https://remix-alpha.ethereum.org,https://remix.ethereum.org']
-      const flags = client === 'besu' ? ['--rpc-http-enabled=true', '--rpc-http-cors-origins="*"'] : geth_flags
+      // const geth_flags = ['--dev', '--rpc', '--rpccorsdomain', 'https://remix-alpha.ethereum.org,https://remix.ethereum.org']
+      if (client === 'geth') {
+        flags = ['--dev', '--rpc', '--rpcaddr', "0.0.0.0"]
+      } 
+      else if (client === 'ewasm') {
+        flags = [
+          '--vm.ewasm="/path/to/libhera.so,metering=true,fallback=true"',
+          '--datadir', '/tmp/ewasm-node/4201/',
+          '--etherbase', '031159dF845ADe415202e6DA299223cb640B9DB0',
+          '--rpc', '--rpcapi', "web3,net,eth,debug",
+          '--rpcvhosts="*"', '--rpcaddr', "0.0.0.0",
+          '--rpccorsdomain', "*",
+          '--vmodule', "miner=12,rpc=12",
+          '--mine', '--miner.threads', '1',
+          '--nodiscover',
+          '--networkid', '66',
+          '--bootnodes', "enode://53458e6bf0353f3378e115034cf6c6039b9faed52548da9030b37b4672de4a8fd09f869c48d16f9f10937e7398ae0dbe8b9d271408da7a0cf47f42a09e662827@23.101.78.254:30303"
+        ]
+      } else if (client === 'besu') {
+        flags = ['--rpc-http-enabled=true', '--rpc-http-cors-origins="*"']
+      }
+      
       const ipc = await _client.start(flags)
+      // FIXME determine RPC ready state
+      console.log('FIXME wait 5sec for RPC')
+      await sleep(3000)
+
       let provider
       if (ipc) {
         provider = new ethers.providers.IpcProvider(ipc)
       } else {
         console.log(chalk.yellow('WARNING: no ipc - fallback to http rpc api'))
-        provider = new ethers.providers.JsonRpcProvider()
+        provider = new ethers.providers.JsonRpcProvider('http://127.0.0.1:8545')
       }
       clientsCtx = {
         ethereum: provider

@@ -11,6 +11,7 @@ const LOGO = `
 | |__| | |  | | (_| |      | |____| |____ _| |_ 
  \\_____|_|  |_|\\__,_|       \\_____|______|_____|
                                                 
+Version ${require('./../../package.json').version}
 `
 console.log(LOGO)
 

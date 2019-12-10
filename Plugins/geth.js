@@ -41,6 +41,7 @@ const findIpcPathInLogs = logs => {
   console.log('IPC path not found in logs', logs)
   return null
 }
+const TYPE = require('grid-core/constants/plugin_types')
 
 module.exports = {
   type: 'client',
@@ -48,6 +49,7 @@ module.exports = {
   displayName: 'Geth',
   name: 'geth',
   repository: 'azure:gethstore',
+  type: TYPE.CLIENT,
   modifiers: {
     version: ({ version }) =>
       version
