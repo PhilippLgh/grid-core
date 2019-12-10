@@ -1,10 +1,10 @@
-import { promises as fs } from 'fs'
+import { promises as fs, existsSync } from 'fs'
 import path from 'path'
 import vm from 'vm'
 
 import { createLogger, LOGLEVEL, isFile, isDir, isUrl } from '../util'
 import IPlugin from './IPlugin';
-import { IPackage } from 'ethpkg'
+import { IPackage, PackageManager } from 'ethpkg'
 const logger = createLogger(LOGLEVEL.NORMAL)
 
 export default class PluginManager {
@@ -14,14 +14,14 @@ export default class PluginManager {
     this.plugins = []
     this.createContext = createContext
   }
-  private async loadPluginFromSource(source: string) : Promise<IPlugin> {
+  private async loadPluginFromSource(source: string, pluginPkg? : IPackage) : Promise<IPlugin> {
     // FIXME temp fix for clef plugin
     source = source.replace(`const userDataPath = require('electron').app.getPath('userData')`, 'const userDataPath = "C:/Users/Philipp/AppData/Roaming/grid"')
     /**
      * Note that running untrusted code is a tricky business requiring great care. 
      * To prevent accidental global variable leakage, vm.runInNewContext is quite useful, but safely running untrusted code requires a separate process.
      */
-    const sandbox = this.createContext()
+    const sandbox = this.createContext(pluginPkg)
 
     const result = vm.runInNewContext(source, sandbox)
     const { exports: pluginExports } = sandbox.module
@@ -45,13 +45,19 @@ export default class PluginManager {
     return this.loadPluginFromSource(source)
   }
   private async loadPluginFromPackage(pluginPkg: IPackage) : Promise<IPlugin> {
-    const index = await pluginPkg.getEntry('package/index.js')
+    const indexNPM = await pluginPkg.getEntry('package/index.js')
+    if (indexNPM) {
+      console.log('WARNING: Plugins should not be packaged with NPM anymore. And will become invalid in the future.')
+    }
+    const indexReg = await pluginPkg.getEntry('index.js')
+    const index = indexNPM || indexReg
     if (!index) {
       throw new Error('Malformed plugin package: "package/index.js" entry not found')
     }
     const source = (await index.file.readContent()).toString()
     // console.log('source', source)
-    const plugin = await this.loadPluginFromSource(source)
+    const plugin = await this.loadPluginFromSource(source, pluginPkg)
+    plugin.pkg = pluginPkg
     return plugin
   }
   private async loadPluginFromUrl(pluginUrl: string) : Promise<IPlugin> {
@@ -112,10 +118,22 @@ export default class PluginManager {
     let taskName = `Plugin init: ${pluginDir}`
     console.time(taskName)
     for (const f of pluginFiles) {
-      if (!f.endsWith('.js')) continue
       try {
-        const fullPath = path.join(pluginDir, f)
-        const plugin = await this.loadPluginFromFile(fullPath)
+        let fullPath = path.join(pluginDir, f)
+        let plugin = undefined
+        if (await isDir(fullPath)) {
+          // TODO allow recursive scanning of nested non-plugin-dirs
+          if (!(await existsSync(path.join(fullPath, 'index.js')))) {
+            continue
+          }
+          // convert plugin dir to package first - important for docker support
+          const pm = new PackageManager()
+          const tar = await pm.createPackage(fullPath)
+          plugin = await this.loadPluginFromPackage(tar)
+        } else {
+          if (!fullPath.endsWith('.js')) continue
+          plugin = await this.loadPluginFromFile(fullPath)
+        }
         if (!plugin) continue
         plugins.push(plugin)
       } catch (error) {
