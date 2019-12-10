@@ -1,17 +1,31 @@
 import path from 'path'
+import fs from 'fs'
 import { EventEmitter } from 'events'
 import PluginManager from './PluginSystem/PluginManager'
-import { StateListener, ClientManager, CLIENT_FETCH_STATES, ClientManagerConfig } from './Clients/ClientManager'
+import { StateListener, ClientManager, INIT_CLIENT_EVENTS, ClientManagerConfig } from './Clients/ClientManager'
 import { start } from './ApiServer'
 import ConfigBuilder from './Settings/ConfigBuilder'
 import { GLOBAL_SETTINGS } from './Settings/GlobalSettings'
 import { WORKFLOW_TAGS, PLUGIN_TYPES } from './constants'
 import { createContext } from './PluginContext'
 import Workflow from './Workflows/Workflow'
+import DockerClientManager from './Clients/DockerClientManager'
+import { IPackage } from 'ethpkg'
+
 const PLUGIN_DIR = path.join(__dirname, '..', 'Plugins')
 const WORKFLOW_DIR = path.join(__dirname, '..', 'Plugins', 'workflows')
 
-export { WORKFLOW_TAGS, PLUGIN_TYPES, GLOBAL_SETTINGS, CLIENT_FETCH_STATES }
+const makeTemp = () => {
+  let temp = path.join(process.cwd(), 'grid_temp')
+  if (!fs.existsSync(temp)) {
+    fs.mkdirSync(temp)
+  }
+  return temp
+}
+const TEMP = makeTemp()
+
+
+export { WORKFLOW_TAGS, PLUGIN_TYPES, GLOBAL_SETTINGS, INIT_CLIENT_EVENTS }
 
 export function instanceofClientManagerConfig(object: any): object is ClientManagerConfig {
   return typeof object === 'object' && ('repository' in object)
@@ -43,7 +57,8 @@ export default class Grid extends EventEmitter {
         this.workflows.push(new Workflow(config))
       }
       else if(config.type === PLUGIN_TYPES.CLIENT){
-        this.clientManagers.push(new ClientManager(config))
+        const cm = await this.createClientManager(config)
+        this.clientManagers.push(cm)
       }
       else {
         console.log('Invalid plugin found - has not type', config.name)
@@ -77,10 +92,18 @@ export default class Grid extends EventEmitter {
     await this.whenReady()
     return this.pluginManager.getAllPlugins()
   }
-  async createClientManager(config: ClientManagerConfig) {
+  async createClientManager(config: ClientManagerConfig, pluginCtx?: IPackage) {
     // FIXME if instantiation successful the ClienManager should be added to all client managers
     // we also have to avoid conflicts if one with same name already exists
-    return new ClientManager(config)
+    const { repository } = config
+    if (repository.startsWith('docker:') || 'docker' in config) {
+      // TODO handle throws Docker not running
+      return new DockerClientManager(config, pluginCtx)
+    }
+    return new ClientManager({
+      ...config,
+      cachePath: TEMP
+    })
   }
   /**
    * return the list of client managers i.e.
@@ -108,6 +131,28 @@ export default class Grid extends EventEmitter {
     }
     return clients
   }
+  async getBinaries(repository: string, nameOrOptions? : string | any) {
+    const name = typeof nameOrOptions === 'string' ? nameOrOptions : repository.split('/').pop()
+    if (!name) {
+      throw new Error('name not provided and could not be parsed from repository url: ' + repository)
+    }
+    const clientManager = await this.createClientManager({
+      name,
+      repository
+    })
+    // FIXME make optional and manage path globally
+    const CACHE_DIR = path.join(process.cwd(), 'grid_temp')
+    // FIXME get platform from options
+    const platform = 'linux'
+    const pkg = await clientManager.getBinaries(CACHE_DIR, (newState: string) => {
+      console.log('fetch client binaries', newState)
+    })
+    if (!pkg) {
+      throw new Error('Binaries could not be fetched')
+    }
+    return pkg
+  }
+
   async getClient(clientDefinition: string | ClientManagerConfig, options : any = {}) {
     await this.whenReady()
     options = options
@@ -116,6 +161,18 @@ export default class Grid extends EventEmitter {
 
     let clientManager = undefined
     let clientName = '<client name>'
+
+    // FIXME use specifier validation instead of `docker:`
+    if (typeof clientDefinition === 'string' && clientDefinition.startsWith('docker:')) {
+      // if string is valid specifier allow to create ClientManager on the fly
+      // expand string to ClientManagerConfig
+      // 'docker:local/ewasm'
+      clientDefinition = {
+        name: (clientDefinition.split('/')).pop() || '<unknown>',
+        repository: clientDefinition
+      } as ClientManagerConfig
+    }
+
     if (instanceofClientManagerConfig(clientDefinition)) {
       clientManager = await this.createClientManager(clientDefinition)
       clientName = clientDefinition.name
