@@ -1,14 +1,33 @@
-import { Command, command, param, Options, option, metadata } from 'clime'
+import fs from 'fs'
+import path from 'path'
+import { Command, command, param, params, Options, option, metadata, CastingContext } from 'clime'
 import Grid from '../../..'
+import { createCLIPrinter } from '../../cli-utils'
+import { PROCESS_EVENTS } from '../../../ProcessEvents'
+
+class Flags {
+  constructor() {
+  }
+  static cast(flags: string, context: CastingContext<Flags>): Flags {
+    // expects flags: 'client=x,network=y' 
+    // note: we do some preprocessing to avoid parsing conflicts with clime
+    return flags.split(',').map(f => {
+      let [flag, value] = f.split('=')
+      return {
+        flag, value
+      }
+    })
+  }
+}
 
 // FIXME allow flexible pass-through options for plugins 
-class WorkflowOptions extends Options {
+export class PassThroughOptions extends Options {
   @option({
-    flag: 'n',
-    description: 'network name',
-    default: 'goerli'
+    flag: 'f',
+    description: 'list of --key=value pairs',
+    default: '',
   })
-  network: string = 'goerli';
+  flags?: Flags;
 }
 
 @command({
@@ -19,20 +38,34 @@ export default class extends Command {
   public async execute(
     @param({
       name: 'workflow',
-      description: 'workflow name',
+      description: 'workflow name, url, path or package query',
       required: true,
     })
-    workflowName: string,
-    options: WorkflowOptions
+    workflowSpec: string,
+    options: PassThroughOptions
   ) {
-    const grid = new Grid()
-    const workflow = await grid.getWorkflow(workflowName)
-    const config = {}
 
-    try {
-      await workflow.run()
-    } catch (error) {
-      console.log('workflow error', error)
-    }
+    const { flags } = options
+
+    const grid = new Grid()
+    const printer = await createCLIPrinter()
+
+    await grid.workflowManager.runWorkflow(workflowSpec, flags, {
+      listener: (newState: string, args: any) => {
+        printer.listener(newState, args)
+        if (newState === PROCESS_EVENTS.RUN_WORKFLOW_STARTED) {
+          const { workflow } = args
+          console.log(`Starting workflow:
+=============================================================
+Name: ${workflow.name}
+Version: ${workflow.version}
+Description: ${workflow.description}
+=============================================================
+Output:
+              `)
+        }
+      }
+    })
+    console.log('=============================================================')
   }
 }
