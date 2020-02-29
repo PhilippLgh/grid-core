@@ -1,5 +1,5 @@
 'use strict'
-import Hapi from 'Hapi'
+import Hapi from '@hapi/hapi'
 import Grid from '../Grid'
 
 // Start the server  
