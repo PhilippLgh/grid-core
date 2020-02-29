@@ -1,3 +1,5 @@
+.DS_Store
+
 # Logs
 logs
 *.log
@@ -103,5 +105,8 @@ dist
 # TernJS port file
 .tern-port
 
-grid_temp
 build
+docs
+Plugins/workflows
+
+workflows

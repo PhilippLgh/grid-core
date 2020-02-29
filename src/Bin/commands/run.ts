@@ -1,7 +1,6 @@
 import { Command, command, param, Options, option } from 'clime'
 import Grid from '../../Grid'
 import path from 'path'
-import { printFetchStateToCLI, replaceAll } from '../cli-utils'
 import chalk from 'chalk'
 
 @command({
@@ -16,17 +15,6 @@ export default class extends Command {
     })
     clientName: string
   ) {
-    const grid = new Grid()
-    const client = await grid.getClient(clientName, {
-      listener: printFetchStateToCLI(clientName)
-    })
-
-    // console.log('start with', START.split(' '))
-    client.on('log', (l) => {
-      console.log(chalk.gray(l))
-    })
-    const result = await client.start()
-    // const result = await client.execute('version')
-
+    throw new Error('not implemented -  use workflows instead')
   }
 }

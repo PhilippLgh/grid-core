@@ -1,0 +1,42 @@
+.git/
+
+# for WebStorm
+.idea/
+
+# for npm
+node_modules/
+npm-shrinkwrap.json
+
+# for grunt
+typings/
+.tscache/
+espowered/
+
+# for https://github.com/Microsoft/TypeScript/issues/4667
+lib/**/*.ts
+!lib/**/*.d.ts
+
+# codes
+test/
+src/
+spec/
+
+# misc
+example/
+.gitignore
+.editorconfig
+.circleci/
+setup.sh
+Gruntfile.js
+tslint.json
+
+npm-debug.log
+yarn-error.log
+
+yarn-error.log
+.vscode/
+
+.DS_Store
+docs/
+
+build

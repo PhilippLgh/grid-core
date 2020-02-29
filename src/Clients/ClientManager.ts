@@ -1,24 +1,40 @@
 import path from 'path'
 import fs from 'fs'
 import Client from './Client'
-import { PackageManager, IPackage } from 'ethpkg'
+import { PackageManager, IPackage, PROCESS_STATES, FetchOptions } from 'ethpkg'
 import { uuid, resolveRuntimeDependency } from '../util'
-import { IRelease } from 'ethpkg/dist/Fetcher/IRepository'
-import { INIT_CLIENT_EVENTS } from './InitClientEvents'
+import { IRelease } from 'ethpkg'
+import { PROCESS_EVENTS } from '../ProcessEvents'
+import { StateListener } from '../StateListener'
 
-export { INIT_CLIENT_EVENTS }
-
-export type ReleaseSpecifier = string
-
-export type StateListener = (newState: string, arg: any) => undefined | void
+export { PROCESS_EVENTS }
 
 type FilterFunction = (release: IRelease) => boolean
 
-export interface FetchClientOptions {
-  spec? : ReleaseSpecifier,
-  listener?: StateListener 
+// TODO move to utils
+const extractPlatformFromString = (str : string) => {
+  str = str.toLowerCase() 
+  if (str.includes('win32') || str.includes('windows')) {
+    return 'windows'
+  }
+  if (str.includes('darwin') || str.includes('mac') || str.includes('macos')) {
+    return 'darwin'
+  }
+  if (str.includes('linux')) {
+    return 'linux'
+  }
+  return undefined
 }
 
+export interface FetchClientOptions {
+  platform?: string,
+  version?: string,
+  onDownloadProgress?: (progress: number, release: IRelease) => void,
+  listener?: StateListener,
+  cachePath?: string,
+  extract?: boolean,
+  verify?: boolean
+}
 
 export interface ClientManagerConfig {
   name: string;
@@ -46,7 +62,6 @@ export class ClientManager {
 
   constructor(config: ClientManagerConfig) {
     this._config = config
-    const { name, repository, filter, prefix } = config
     this._packageManager = new PackageManager()
     this.id = uuid()
   }
@@ -98,25 +113,168 @@ export class ClientManager {
     }
   }
 
-  async getVersions() {
+  async getVersions(options: FetchOptions = {}) : Promise<Array<IRelease>> {
     const filter = this.filter ? this.createFilter(this.filter) : undefined
     return this._packageManager.listPackages(this.repository, {
+      ...options,
       filter
     })
   }
 
-  async resolve(spec: string, listener: StateListener) {
+  async resolve(query: string, listener: StateListener) : Promise<IRelease> {
     const filter = this.filter ? this.createFilter(this.filter) : undefined
-    return this._packageManager.findPackage(spec, { listener, filter })
+    throw new Error('not implemented')
+    // return this._packageManager.findPackage(spec, { listener, filter })
   }
 
-  async getAllClients() {
+  private async getPackage({
+    version = 'latest',
+    platform = process.platform,
+    onDownloadProgress = () => {},
+    listener = (newState: string, arg: any) => undefined,
+    cachePath = this.cachePath,
+    extract = false,
+    verify = false
+  } : FetchClientOptions = {}) : Promise<IPackage | undefined> {
+
+    if (['mac'].includes(platform.toLowerCase())) {
+      platform = 'darwin'
+    }
+
+    // first, get the package, containing the binaries
+    const pkg : IPackage | undefined = await this._packageManager.getPackage(this.repository, {
+      // prefix: 'geth-darwin', // server-side processed name- / path-filter. default: undefined
+      filter: (release: IRelease) => {
+        const _platform = extractPlatformFromString(release.fileName)
+        return _platform !== undefined && (_platform === platform)
+      },
+      version: version === 'latest' ? undefined : version, // specific version or version range that should be returned
+      // pagination: true, // if pagination should be used and/or number of pages
+      limit: 1000, // number of max results
+      // timeout? : number // time in ms for request timeouts.
+      // skipCache? : boolean // if cached files should be ignored. default: false 
+      cache: cachePath, // user defined path to cache dir(s) where to look for packages 
+      // headers
+      // proxy
+      // onDownloadProgress,
+      listener: (newState: string, args: any) => {
+        // MAP ethpkg events to grid events and extend them with info
+        if (newState === PROCESS_STATES.RESOLVE_PACKAGE_STARTED) {
+          const { platform, version} = args
+          listener(PROCESS_EVENTS.RESOLVE_RELEASE_STARTED, { platform, version: version || 'latest', name: this.name })
+        }
+        else if(newState === PROCESS_STATES.RESOLVE_PACKAGE_FINISHED) {
+          const { release, platform, version } = args
+          listener(PROCESS_EVENTS.RESOLVE_RELEASE_FINISHED, { release, platform, version: version || 'latest', name: this.name })
+        } else {
+          listener(newState, args)
+        }
+      },
+      destPath: cachePath,
+      // metadata: 'detached',
+      extract,
+      verify
+    })
+
+    return pkg
+  }
+
+  async getClient({
+    version = 'latest',
+    platform = process.platform,
+    onDownloadProgress = () => {},
+    listener = (newState: string, arg: any) => undefined,
+    cachePath = this.cachePath,
+    extract = false,
+    verify = false
+  } : FetchClientOptions = {}) : Promise<Client> {
+
+    if (!cachePath) {
+      throw new Error('Cannot download client: invalid path provided')
+    }
+
+    const pkg = await this.getPackage({
+      version,
+      platform,
+      listener,
+      cachePath,
+      extract
+    })
+    if(!pkg) {
+      throw new Error('Could not fetch package')
+    }
+
+    // TODO we have two ways to verify: package signature and gpg
+
+    // check if the extracted binary exists before extracting it
+    // we try to cache binaries with <package name>.<binary extension>
+    const { metadata } = pkg
+    let { name } = metadata || {}
+    if (name) {
+      if (process.platform === 'win32') {
+        name = name.endsWith('.exe') ? name : `${name}.exe`
+      }
+      const cachedBinPath = path.join(cachePath, name)
+      if (fs.existsSync(cachedBinPath)) {
+        return new Client(cachedBinPath, this._config, metadata)
+      }
+    }
+
+    // extract the binaries from the package OR extract all contents if necessary
+    const binaryPath = await this.extractBinary(pkg, cachePath, listener, name)
+
+    const client = new Client(binaryPath, this._config, metadata)
+    // FIXME store clients in managed clients
+    return client
+
+    /*
+    const pkg = await this.getBinaries(cachePath, listener)
+
+    if (this.unpack) {
+
+      // FIXME this is not always correct: "name" not always the the package content name
+      let name = pkg.metadata && pkg.metadata.name
+      let packagePath : string | undefined = name ? path.join(cachePath, name) : undefined
+      if (!packagePath || !fs.existsSync(packagePath)) {
+        packagePath = undefined
+        // client needs to be unpacked
+        listener(PROCESS_EVENTS.PACKAGE_EXTRACTION_STARTED, {})
+        packagePath = await pkg.extract(cachePath, (progress : number, file: string) => {
+          listener(PROCESS_EVENTS.PACKAGE_EXTRACTION_PROGRESS, {
+            progress,
+            file
+          })
+        })
+        listener(PROCESS_EVENTS.PACKAGE_EXTRACTION_FINISHED, { packageContentsPath: packagePath })
+      }
+
+      listener(PROCESS_EVENTS.RESOLVE_DEPENDENCIES_STARTED, {})
+      // FIXME support other runtimes as well
+      const JAVA_PATH = await resolveRuntimeDependency({
+        name: 'Java'
+      })
+      listener(PROCESS_EVENTS.RESOLVE_DEPENDENCIES_FINISHED, {})
+
+      const binaryPath = JAVA_PATH
+      return new Client(binaryPath, this._config, packagePath)
+    } else {
+      listener(PROCESS_EVENTS.BINARY_EXTRACTION_STARTED, {})
+      const binaryPath = await this.extractBinary(pkg, cachePath)
+      listener(PROCESS_EVENTS.BINARY_EXTRACTION_FINISHED, { binaryPath })
+      return new Client(binaryPath, this._config)
+    }
+    */
+  }
+
+  async getAllClients() : Promise<Array<Client>> {
+    console.log('search for clients at:', this.cachePath)
     return <Array<Client>>[]
   }
 
-  private async extractBinary(pkg : IPackage, destPath: string) {
+  private async extractBinary(pkg : IPackage, destPath: string, listener: StateListener,fileName?: string) {
+    const packagePath = pkg.filePath // only set if loaded from cache
+    listener(PROCESS_EVENTS.BINARY_EXTRACTION_STARTED, { packagePath })
     const entries = await pkg.getEntries()
-    // const entries = await this.updater.getEntries(pkgPathOrUrl)
     if (entries.length === 0) {
       throw new Error('Invalid or empty package')
     }
@@ -138,7 +296,7 @@ export class ClientManager {
 
     if (!binaryEntry) {
       throw new Error(
-        'binary not found in package: try to specify binaryName in your plugin'
+        'Binary not found in package: try to specify binaryName in your plugin'
       )
     } else {
       binaryName = binaryEntry.file.name
@@ -147,10 +305,17 @@ export class ClientManager {
 
     // FIXME use proper caching here
     // FIXME use content addressing here
-    const destAbs = path.join(destPath, binaryName) //path.join(this.cacheDir, binaryName)
+    const binaryExtension = path.extname(binaryName)
+    // append the correct binary extension to the user fileName if necessary
+    if (fileName && !fileName.endsWith(binaryExtension)) {
+      fileName += binaryExtension
+    }
+    const destAbs = path.join(destPath, fileName || binaryName)
+    listener(PROCESS_EVENTS.BINARY_EXTRACTION_PROGRESS, { packagePath: pkg.filePath, binaryPathPackage: binaryEntry.relativePath, binaryPathFs: destAbs })
     // The unlinking might fail if the binary is e.g. being used by another instance
     if (fs.existsSync(destAbs)) {
-      fs.unlinkSync(destAbs)
+      return destAbs
+      // fs.unlinkSync(destAbs)
     }
     // IMPORTANT: if the binary already exists the mode cannot be set
     fs.writeFileSync(
@@ -160,81 +325,7 @@ export class ClientManager {
         mode: parseInt('754', 8) // strict mode prohibits octal numbers in some cases
       }
     )
-
+    listener(PROCESS_EVENTS.BINARY_EXTRACTION_FINISHED, { packagePath, binaryPathPackage: binaryEntry.relativePath, binaryPathFs: destAbs })
     return destAbs
-  }
-
-  // TODO make private
-  async getBinaries(
-    cacheDir: string,
-    listener: StateListener,
-  ) {
-    const repo = this.repository
-
-    // FIXME get client package and extract binary here
-    const filter = this.filter ? this.createFilter(this.filter) : undefined
-    const pkg : IPackage | undefined = await this._packageManager.getPackage({
-      spec: `${repo}`,
-      listener,
-      filter,
-      cache: cacheDir
-    })
-    if (!pkg) {
-      throw new Error('Could not fetch the package')
-    }
-    if (pkg.metadata) {
-      // TODO fire listener
-      const { fileName } = pkg.metadata
-      let cachedBinaryPath = path.join(cacheDir, fileName)
-      // reading and writing to same file can cause issues -> don't attempt overwrite of cached data
-      if (!fs.existsSync(cachedBinaryPath)) {
-        await pkg.writePackage(cachedBinaryPath)
-      }
-    }
-
-    return pkg
-  }
-
-  async getClient({
-    spec = 'latest', 
-    listener = (newState: string, arg: any) => undefined
-  } : FetchClientOptions = {}) : Promise<Client> {
-
-    const cache = this.cachePath
-    const pkg = await this.getBinaries(cache, listener)
-
-    if (this.unpack) {
-
-      // FIXME this is not always correct: "name" not always the the package content name
-      let name = pkg.metadata && pkg.metadata.name
-      let packagePath : string | undefined = name ? path.join(cache, name) : undefined
-      if (!packagePath || !fs.existsSync(packagePath)) {
-        packagePath = undefined
-        // client needs to be unpacked
-        listener(INIT_CLIENT_EVENTS.PACKAGE_EXTRACTION_STARTED, {})
-        packagePath = await pkg.extract(cache, (progress : number, file: string) => {
-          listener(INIT_CLIENT_EVENTS.PACKAGE_EXTRACTION_PROGRESS, {
-            progress,
-            file
-          })
-        })
-        listener(INIT_CLIENT_EVENTS.PACKAGE_EXTRACTION_FINISHED, { packageContentsPath: packagePath })
-      }
-
-      listener(INIT_CLIENT_EVENTS.RESOLVE_DEPENDENCIES_STARTED, {})
-      // FIXME support other runtimes as well
-      const JAVA_PATH = await resolveRuntimeDependency({
-        name: 'Java'
-      })
-      listener(INIT_CLIENT_EVENTS.RESOLVE_DEPENDENCIES_FINISHED, {})
-
-      const binaryPath = JAVA_PATH
-      return new Client(binaryPath, this._config, packagePath)
-    } else {
-      listener(INIT_CLIENT_EVENTS.BINARY_EXTRACTION_STARTED, {})
-      const binaryPath = await this.extractBinary(pkg, cache)
-      listener(INIT_CLIENT_EVENTS.BINARY_EXTRACTION_FINISHED, { binaryPath })
-      return new Client(binaryPath, this._config)
-    }
   }
 }

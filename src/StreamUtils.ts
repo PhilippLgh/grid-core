@@ -1,6 +1,7 @@
 import { Transform, Writable } from 'stream'
 import { StringDecoder } from 'string_decoder'
-import { WriteStream } from 'fs';
+import { WriteStream } from 'fs'
+import stream, { Stream } from 'stream' 
 
 const decoder = new StringDecoder('utf8');
 
@@ -28,6 +29,25 @@ export const breakNewLine = new Transform({
     cb()
   }
 })
+
+export const bufferToStream = (buf: Buffer) => {
+  const readable = new stream.Readable()
+  readable._read = () => {} // _read is required but you can noop it
+  readable.push(buf)
+  readable.push(null)
+  return readable
+}
+
+export const streamToBuffer = async (stream: ReadableStream) => {
+  // stream.on('data', (data: any) => {console.log('data', data)})
+  const chunks = []
+  // TODO make sure this works on older nide versions as well
+  // @ts-ignore
+  for await (let chunk of stream) {
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
+}
 
 export const streamPromise = (stream : WriteStream | Writable) : Promise<string> => {
   return new Promise((resolve, reject) => {

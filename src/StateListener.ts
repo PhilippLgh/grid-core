@@ -1,0 +1,1 @@
+export type StateListener = (newState: string, arg?: any) => void

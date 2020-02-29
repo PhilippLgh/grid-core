@@ -2,8 +2,22 @@ import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
 import ControlledProcess, { STATES } from '../ControlledProcess'
+import { StateListener } from '../StateListener'
+import { IRelease } from 'ethpkg'
+import { PROCESS_EVENTS } from '../ProcessEvents'
 
 export { STATES }
+
+export interface ClientStartOptions {
+  listener?: StateListener;
+  entryPoint?: string; // binary path inside container
+  service?: boolean; // if the binary is a service (started with container) or execute-once bin
+}
+
+export interface ExecuteOptions {
+  useBash?: boolean // is the command a bash command
+  useEntrypoint?: boolean // is the command input for entrypoint
+}
 
 export default class Client extends EventEmitter {
 
@@ -11,12 +25,14 @@ export default class Client extends EventEmitter {
   process?: ControlledProcess;
   config: any;
   packagePath: string | undefined
+  metadata: IRelease
 
-  constructor(binaryPath: any, config: any, packagePath?: string) {
+  constructor(binaryPath: any, config: any, metadata: IRelease = { fileName: path.basename(binaryPath)}) {
     super()
     this.binaryPath = binaryPath
     this.config = config
-    this.packagePath = packagePath
+    this.metadata = metadata
+    // this.packagePath = packagePath
   }
   get name() {
     return this.config.name
@@ -30,7 +46,7 @@ export default class Client extends EventEmitter {
     return ''
   }
   get version() {
-    return ''
+    return this.metadata.version
   }
 
   get state() {
@@ -43,6 +59,10 @@ export default class Client extends EventEmitter {
 
   async init() {
     return true
+  }
+
+  logs() {
+    return this.process ? this.process.logs : []
   }
 
   private registerEventListeners(process: ControlledProcess) {
@@ -87,19 +107,7 @@ export default class Client extends EventEmitter {
      */
     // FIXME we need better logic for initial flags
     const PACKAGE_PATH = this.packagePath || ''
-    let flags = this.name === 'besu' ? [
-      '-Dvertx.disableFileCPResolving',
-      '-Dbesu.home=$PACKAGE_PATH',
-      '-Dlog4j.shutdownHookEnabled=false',
-      '--add-opens',
-      'java.base/sun.security.provider=ALL-UNNAMED',
-      '-classpath',
-      '$PACKAGE_PATH/lib/*',
-      'org.hyperledger.besu.Besu',
-    ] : []
-    flags = flags.map(f => {
-      return f.replace('$PACKAGE_PATH', PACKAGE_PATH)
-    })
+    let flags: string[] = []
     return flags
   }
 
@@ -107,9 +115,12 @@ export default class Client extends EventEmitter {
    * The promise resolves with a client in *CONNECTED* state
    * @param flags 
    */
-  async start(flags : Array<string> = []) : Promise<string | undefined> {
+  async start(flags : Array<string> = [], {
+    listener = () => {}
+  }: ClientStartOptions = {}) : Promise<string | undefined> {
     let startFlags = await this.getStartFlags()
     flags = startFlags.concat(...flags)
+    listener(PROCESS_EVENTS.CLIENT_START_STARTED, { name: this.name, flags })
     try {
       this.process = new ControlledProcess(
         this.binaryPath,
@@ -122,14 +133,18 @@ export default class Client extends EventEmitter {
       console.log(`Plugin Start Error: ${error}`)
       throw new Error(`Plugin Start Error: ${error}`)
     }
+    listener(PROCESS_EVENTS.CLIENT_START_FINISHED)
     return this.process.ipcPath
   }
 
   async stop() {
-
+    if(!this.process) {
+      return
+    }
+    return this.process.stop()
   }
 
-  async execute(command: string) : Promise<Array<string>> {
+  async execute(command: string, options?: ExecuteOptions) : Promise<Array<string>> {
     return new Promise((resolve, reject) => {
       const { spawn } = require('child_process')
       let flags : Array<string> = []
@@ -188,7 +203,7 @@ export default class Client extends EventEmitter {
       throw new Error('No IPC RPC API available')
     }
     if (!this.process) {
-      throw new Error('RPC API not available - process not running'+ this.state)
+      throw new Error('RPC API not available - process not running: '+ this.state)
       return // FIXME error handling
     }
     let rpcId = 1
