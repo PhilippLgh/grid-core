@@ -1,11 +1,15 @@
 const WORKFLOW_TAGS = {
-  DANGEROUS: 'workflow:tag:dangerous',
-  LEVEL_BEGINNER: 'workflow:tag:beginner',
-  LEVEL_ADVANCED: 'workflow:tag:advanced',
-  INTERNAL: 'workflow:tag:internal',
-  DEV: 'workflow:tag:dev',
-  MAINNET: 'workflow:tag:mainnet',
-  TESTNET: 'workflow:tag:testnet',
+  DANGEROUS: 'tag:workflow:dangerous',
+  LEVEL_BEGINNER: 'tag:workflow:beginner',
+  LEVEL_ADVANCED: 'tag:workflow:advanced',
+  INTERNAL: 'tag:workflow:internal',
+  DEV: 'tag:workflow:dev',
+  UI: 'tag:workflow:ui',
+  MAINNET: 'tag:workflow:mainnet',
+  TESTNET: 'tag:workflow:testnet',
+  EXPERIMENT: 'tag:workflow:experiment',
+  UTILS: 'tag:workflow:utils',
+  DOCKER: 'tag:workflow:docker'
 }
 
 export default WORKFLOW_TAGS
