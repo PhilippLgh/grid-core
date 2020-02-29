@@ -4,6 +4,10 @@ import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
 import net from 'net'
 import { Writable } from 'stream'
 
+const sleep = (t: number) : Promise<string> => new Promise((resolve, reject) => {
+  setTimeout(() => resolve(`slept ${t} ms`), t)
+})
+
 type StringMap = {[index: string] : string}
 
 export const STATES : StringMap = {
@@ -39,7 +43,8 @@ class ControlledProcess extends EventEmitter {
     this.binaryPath = binaryPath
     this.resolveIpc = resolveIpc
     // this.handleData = handleData
-    this.debug = console.log // debug(name)
+    // FIXME debug logger
+    this.debug = () => {}, // debug(name)
     this.ipc = undefined
     this.stdin = undefined
     this.logs = []
@@ -77,7 +82,7 @@ class ControlledProcess extends EventEmitter {
 
       // Add start cmd to logs
       const cmd = `${this.binaryPath} ${flags.join(' ')}`
-      // console.log('Start command: ', cmd)
+      this.debug('Start command: ', cmd)
       this.logs.push(cmd)
 
       // Spawn process
@@ -104,6 +109,7 @@ class ControlledProcess extends EventEmitter {
           const errorMessage = `${this.binaryPath} child process exited with code: ${code}`
           this.emitPluginError(errorMessage)
           this.debug('DEBUG Last 10 log lines: ', this.logs.slice(-10))
+          console.log('DEBUG Last 15 log lines: ', this.logs.slice(-15))
           reject(errorMessage)
         }
       }
@@ -118,7 +124,7 @@ class ControlledProcess extends EventEmitter {
         const ipcPath = await this.tryResolveIpc()
         this.ipcPath = ipcPath
         if (this.ipcPath) {
-          console.log('Connecting to IPC at', this.ipcPath)
+          this.debug('Connecting to IPC at', this.ipcPath)
           const state = await this.connectIPC(this.ipcPath)
           if (state === STATES.CONNECTED) {
             resolve(this)
@@ -187,23 +193,26 @@ class ControlledProcess extends EventEmitter {
       // this.ipcPath = null
     })
   }
-  private tryResolveIpc() : Promise<string | undefined> {
+  private async tryResolveIpc() : Promise<string | undefined> {
     if (!this.resolveIpc) {
       return Promise.resolve(undefined)
     }
-    return new Promise((resolve, reject) => {
-      // TODO we could use set interval instead for faster feedback
-      setTimeout(async () => {
-        try {
-          if (this.resolveIpc) {
-            return resolve(this.resolveIpc(this.logs))
-          }
-        } catch (error) {
-          this.debug(`Failed to establish ipc connection: ${error.message}`)
-          reject(error)
+    let retries = 0
+    while (++retries < 20) {
+      try {
+        this.debug('Trying to detect ipc path attempt: #', retries)
+        const ipc = await this.resolveIpc(this.logs)
+        if (ipc) {
+          return ipc
+        } else  {
+          await sleep(500)
         }
-      }, 3000) // FIXME require long timeouts in tests - better solution?
-    })
+      } catch (error) {
+        this.debug(`Failed to establish ipc connection: ${error.message}`)
+        return Promise.reject(error)
+      }
+    }
+    return Promise.reject('IPC detection timeout')
   }
   // tries to establish and IPC connection to the spawned process
   connectIPC(ipcPath: string) {
