@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import os from 'os'
 import crypto from 'crypto'
 
 export const LOGLEVEL = {
@@ -18,7 +19,7 @@ class Logger {
       if (loglevel === LOGLEVEL.WARN) {
         console.log(`WARNING: ${message} ${optionalParams}`)
       } else {
-        console.log(message, optionalParams)
+        // console.log(message, ...optionalParams)
       }
     }
   }
@@ -51,8 +52,50 @@ export const isDir = async (filePath: string) : Promise<boolean> => {
   } catch (error) { 
     return false
   }
-} 
+}
 
+export const isDirSync = (filePath : string | undefined) => {
+  if (filePath === undefined) {
+    return false
+  }
+  try {
+    const fileStats = fs.lstatSync(filePath);
+    return fileStats.isDirectory()
+  } catch (error) {
+    return false
+  }
+}
+
+export const is = {
+  windows: process.platform === 'win32',
+  mac: process.platform === 'darwin',
+  linux: (process.platform !== 'darwin') && (process.platform !== 'win32')
+}
+
+export const appDataPath = async (...subPath : Array<string>) => {
+  subPath = subPath || []
+  const HOME = os.homedir()
+  let appdata
+  if (is.windows) {
+    appdata = process.env.appdata || path.join(HOME, 'AppData', 'Roaming')
+  } 
+  else if (is.mac) {
+    appdata = path.join(HOME, 'Library', 'Application Support')
+  } 
+  else {
+    appdata = process.env.XDG_CONFIG_HOME || path.join(HOME, '.config')
+  }
+  process.env.APPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share")
+  appdata = path.join(appdata, 'Grid', ...subPath)
+  if(!fs.existsSync(appdata)) {
+    fs.mkdirSync(appdata, {
+      recursive: true
+    })
+  }
+  return appdata
+}
+
+export const getDataDir = appDataPath
 
 /**
  * RegExps.
@@ -64,6 +107,8 @@ var protocolAndDomainRE = /^(?:\w+:)?\/\/(\S+)$/;
 
 var localhostDomainRE = /^localhost[\:?\d]*(?:[^\:?\d]\S*)?$/
 var nonLocalhostDomainRE = /^[^\s\.]+\.\S{2,}$/;
+
+export const isDirPath = (str: string) => !path.extname(str)
 
 /**
  * Loosely validate a URL `string`.
