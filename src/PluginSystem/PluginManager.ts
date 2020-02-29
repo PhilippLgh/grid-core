@@ -2,48 +2,102 @@ import { promises as fs, existsSync } from 'fs'
 import path from 'path'
 import vm from 'vm'
 
-import { createLogger, LOGLEVEL, isFile, isDir, isUrl } from '../util'
+import { createLogger, LOGLEVEL, isFile, isDir, isUrl, isDirSync } from '../util'
 import IPlugin from './IPlugin';
-import { IPackage, PackageManager } from 'ethpkg'
+import { IPackage, PackageManager, instanceofIPackage } from 'ethpkg'
 const logger = createLogger(LOGLEVEL.NORMAL)
+
+const pm = new PackageManager()
+
+type PackageJson = {[index:string]: any}
 
 export default class PluginManager {
   plugins: Array<IPlugin>
   createContext: any;
-  constructor(createContext: Function){
+  constructor(createContext: Function, private runSandboxed = true){
     this.plugins = []
     this.createContext = createContext
   }
-  private async loadPluginFromSource(source: string, pluginPkg? : IPackage) : Promise<IPlugin> {
-    // FIXME temp fix for clef plugin
-    source = source.replace(`const userDataPath = require('electron').app.getPath('userData')`, 'const userDataPath = "C:/Users/Philipp/AppData/Roaming/grid"')
+  private async loadPlugin(source: string, pkgJson: PackageJson, pluginPkg? : IPackage) {
+
+    let pluginExports : any
     /**
      * Note that running untrusted code is a tricky business requiring great care. 
      * To prevent accidental global variable leakage, vm.runInNewContext is quite useful, but safely running untrusted code requires a separate process.
      */
-    const sandbox = this.createContext(pluginPkg)
+    const originalRequire = require
+    const _require = (moduleName: string) => {
+      if (moduleName === 'grid-core') {
+        // TODO this is not working if not addressed with abs path
+        return originalRequire(path.join('grid-core/dist/index.js'))
+      }else {
+        return originalRequire(moduleName)
+      }
+    }
+    if (this.runSandboxed) {
+      const sandbox = this.createContext(pkgJson, pluginPkg)
+      /*
+      const sandbox = {
+        require: _require,
+        process,
+        console,
+        module: {
+          exports: {}
+        }
+      }
+      */
+      const result = vm.runInNewContext(source, sandbox)
+      pluginExports = sandbox.module.exports
+    } else {
+      const m = require('module')
+      const result = vm.runInThisContext(m.wrap(source))(exports, _require, module, __filename, __dirname)
+      pluginExports = module.exports
+    }
 
-    const result = vm.runInNewContext(source, sandbox)
-    const { exports: pluginExports } = sandbox.module
     // TODO validate / verify
     if (pluginExports === undefined) {
       throw new Error('Plugin has no exports')
     }
-    if (!('name' in pluginExports)) {
+    // TODO async does probably not work like this: we need to defer the exit until promises resolve
+    // TODO what about multiple plugins? process.exit race condition?
+    const exitHandler = async () => {
+      console.log('WARNING: exit handler called')
+      if (typeof pluginExports.onStop === 'function') {
+        try {
+          await pluginExports.onStop()
+        } catch (error) { }
+      }
+      process.exit()
+    }
+    process.on('SIGINT', exitHandler)
+    process.on('uncaughtException', exitHandler)
+    return pluginExports
+  }
+  private async loadPluginFromSource(source: string, pkgJson?: PackageJson, pluginPkg? : IPackage) : Promise<IPlugin> {
+    let pluginExports = await this.loadPlugin(source, pkgJson || {name: '<unknown>'}, pluginPkg)
+    if (!pkgJson) {
+      // TODO deprecate
+      // single-file syntax without package.json
+      pkgJson = pluginExports
+    }
+    if (!pkgJson || !('name' in pkgJson)) {
       throw new Error('Plugin has no name')
     }
-    const { name } = pluginExports
+    const { name } = pkgJson
     return {
       name,
+      pkgJson,
       pluginExports,
       source
     }
   }
+  /*
   private async loadPluginFromFile(fullPath : string) : Promise<IPlugin> {
     const source = await fs.readFile(fullPath, 'utf8')
     // const pluginConfig = require(fullPath)
     return this.loadPluginFromSource(source)
   }
+  */
   private async loadPluginFromPackage(pluginPkg: IPackage) : Promise<IPlugin> {
     const indexNPM = await pluginPkg.getEntry('package/index.js')
     if (indexNPM) {
@@ -54,88 +108,81 @@ export default class PluginManager {
     if (!index) {
       throw new Error('Malformed plugin package: "package/index.js" entry not found')
     }
+
+    const packageJsonEntry = await pluginPkg.getEntry('package.json')
+    if(!packageJsonEntry) {
+      throw new Error('Malformed plugin package: "package.json" entry not found')
+    }
+
+    const pkgJsonBuf = await packageJsonEntry.file.readContent()
+    const pkgJson = JSON.parse(pkgJsonBuf.toString())
+
     const source = (await index.file.readContent()).toString()
     // console.log('source', source)
-    const plugin = await this.loadPluginFromSource(source, pluginPkg)
+    const plugin = await this.loadPluginFromSource(source, pkgJson, pluginPkg)
     plugin.pkg = pluginPkg
     return plugin
   }
+  private async loadPluginFromDir(dirPath: string) : Promise<IPlugin | undefined> {
+    const pluginFiles = await fs.readdir(dirPath)
+    let index = pluginFiles.find((f: string) => f.endsWith('index.js'))
+    let pkgJsonFile = pluginFiles.find((f: string) => f.endsWith('package.json'))
+    if (!index || !pkgJsonFile) {
+      return undefined
+    }
+    // convert plugin dir to package first - important for docker support
+    // console.time('create pkg: '+dirPath)
+    const pkg = await pm.createPackage(dirPath)
+    // console.timeEnd('create pkg: '+dirPath)
+    return this.loadPluginFromPackage(pkg)
+  }
   private async loadPluginFromUrl(pluginUrl: string) : Promise<IPlugin> {
-    // FIXME distinguish between direct link and repo
-    // FIXME replace with ethpkg
-    /*
-    const appManager = new AppManager({
-      repository: pluginUrl
-    })
-    const pluginRelease = await appManager.getRelease({
-      version: undefined, // = 'latest'
-      download: {
-        verifyWith: [{
-          "name": "Ryan Ghods",
-          "email": "ryan@ethereum.org",
-          "address": "0x6ee8d9685eb15e7528282f9e80d2503b23194cc9"
-        }]
-      }
-    })
-
-    if (!pluginRelease || !('data' in pluginRelease)) {
-      throw new Error('Plugin could not be found or downloaded')
-    }
-
-    if ('verificationResult' in pluginRelease) {
-      const { displayName } = pluginRelease
-      const { verificationResult } = pluginRelease
-      const { isValid, isTrusted } = verificationResult
-      if (!isValid) {
-        throw new Error(
-          `Error: "${displayName}" has invalid plugin signature - unsigned or corrupt?`
-        )
-      }
-      if (!isTrusted) {
-        logger.warn(
-          `The plugin "${displayName}" is signed but the author's key is unknown.`
-        )
-      }
-    }
-
-    const pluginPkg = await ethpkg.getPackage(pluginRelease.data)
-
-    const plugin = await this.loadPluginFromPackage(pluginPkg)
-
-    return plugin
-    */
     throw new Error('not implemented')
+  }
+  public async tryLoad(fullFilePathOrUrl: string) {
+    try {
+      // console.log('load plugin from', fullFilePathOrUrl)
+      if (await isFile(fullFilePathOrUrl)) {
+        // TODO deprecate
+        const content = await fs.readFile(fullFilePathOrUrl)
+        const plugin = await this.loadPluginFromSource(content.toString(), undefined)
+        return plugin
+      }
+      else if (await isDir(fullFilePathOrUrl)) {
+        const plugin = await this.loadPluginFromDir(fullFilePathOrUrl)
+        return plugin
+      }
+      else if (await isUrl(fullFilePathOrUrl)) {
+        const plugin = await this.loadPluginFromUrl(fullFilePathOrUrl)
+        return plugin
+      }
+      else {
+        throw new Error('Plugin source is not a valid file, directory or url')
+      }
+    } catch (error) {
+      logger.warn(`Plugin "${fullFilePathOrUrl}" could not be loaded: `, error.message)
+      return undefined
+    }
   }
   private async scanDir(pluginDir: string) : Promise<Array<IPlugin>> {
     const pluginFiles = await fs.readdir(pluginDir)
     const plugins : Array<IPlugin> = []
-    // if directory contains index.js treat as single plugin directory
-    let index = pluginFiles.find((f: string) => f.endsWith('index.js'))
-    if (index) {
-      let plugin = await this.loadPluginFromFile(path.join(pluginDir, index))
+
+    // try to load as single plugin dir
+    let plugin = await this.loadPluginFromDir(pluginDir)
+    if (plugin) {
       return [ plugin ]
     }
+    // else: scan all subdirs
     let taskName = `Plugin init: ${pluginDir}`
-    console.time(taskName)
+    // console.time(taskName)
     for (const f of pluginFiles) {
       try {
         let fullPath = path.join(pluginDir, f)
-        let plugin = undefined
         if (await isDir(fullPath)) {
-          // TODO allow recursive scanning of nested non-plugin-dirs
-          if (!(await existsSync(path.join(fullPath, 'index.js')))) {
-            continue
-          }
-          // convert plugin dir to package first - important for docker support
-          const pm = new PackageManager()
-          const tar = await pm.createPackage(fullPath)
-          plugin = await this.loadPluginFromPackage(tar)
-        } else {
-          if (!fullPath.endsWith('.js')) continue
-          plugin = await this.loadPluginFromFile(fullPath)
+          let _plugins = await this.scanDir(fullPath)
+          plugins.push(..._plugins)
         }
-        if (!plugin) continue
-        plugins.push(plugin)
       } catch (error) {
         if (logger.loglevel <= LOGLEVEL.NORMAL) {
           logger.warn(`Plugin "${f}" could not be loaded: `, error.message)
@@ -144,36 +191,32 @@ export default class PluginManager {
         }
       }
     }
-    console.timeEnd(taskName)
+    // console.timeEnd(taskName)
+    // console.log('return plugins', plugins.map(p => p.name))
     return plugins
   }
   async scan(...pluginSources: Array<string>) {
     let plugins : Array<IPlugin> = []
     for (const pluginSource of pluginSources) {
-      try {
-        if (await isFile(pluginSource)) {
-          const filePlugin = await this.loadPluginFromFile(pluginSource)
-          plugins.push(filePlugin)
-        }
-        else if (await isDir(pluginSource)) {
-          const dirPlugins = await this.scanDir(pluginSource)
-          plugins = [...plugins, ...dirPlugins]
-        }
-        else if (await isUrl(pluginSource)) {
-          const plugin = await this.loadPluginFromUrl(pluginSource)
-          plugins.push(plugin)
-        }
-        else {
-          throw new Error('Plugin source is not a valid file, directory or url')
-        }
-      } catch (error) {
-        logger.warn(`Plugin "${pluginSource}" could not be loaded: `, error.message)
+      const plugin = await this.tryLoad(pluginSource)
+      if  (plugin) {
+        plugins.push(plugin)
       }
     }
-
     this.plugins = plugins
-
     return plugins
+  }
+
+  async load(pluginDirOrPkg: string | IPackage) : Promise<IPlugin> {
+    if (instanceofIPackage(pluginDirOrPkg)) {
+      return this.loadPluginFromPackage(pluginDirOrPkg)
+    } else if (isDirSync(pluginDirOrPkg)) {
+      let plugin = await this.loadPluginFromDir(pluginDirOrPkg)
+      if (plugin) {
+        return plugin
+      }
+    }
+    throw new Error('Could not load plugin')
   }
 
   async getAllPlugins() {
