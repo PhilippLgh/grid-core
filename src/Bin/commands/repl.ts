@@ -4,12 +4,10 @@ import fs from 'fs'
 import { Command, command, param, Options, option, metadata } from 'clime'
 import vm from 'vm'
 import Grid from '../../Grid'
-import { printFetchStateToCLI } from '../cli-utils'
 import chalk from 'chalk'
 import { ethers } from 'ethers'
 import { sleep } from '../../poc'
-import { INIT_CLIENT_EVENTS } from '../../Clients/ClientManager'
-
+import { PROCESS_EVENTS } from '../../ProcessEvents'
 
 export class ReplOptions extends Options {
   @option({
@@ -57,16 +55,21 @@ export default class extends Command {
     */
     
     // this instance will also be available in repl
+    /*
     const grid = new Grid()
 
     if (client) {
       console.log('Preparing client:', client)
-      const listener = printFetchStateToCLI(client)
-      listener(INIT_CLIENT_EVENTS.CLIENT_INIT_STARTED, { name: client })
+      const listener = printEventsToCLI()
+      listener(PROCESS_EVENTS.CLIENT_INIT_STARTED, { name: client })
 
       let _client
       if (client === 'ewasm') {
         const workflow = await grid.getWorkflow(client)
+        if (!workflow) {
+          console.log(`No workflow found for: "${client}"`)
+          return
+        }
         const { getClient } = workflow.exports
         _client = await getClient({
           listener
@@ -126,7 +129,7 @@ export default class extends Command {
       console.log('')
     }
     
-    // WARNING. the spinners (ora) that are used in printFetchStateToCLI
+    // WARNING. the spinners (ora) that are used in printEventsToCLI
     // mess with stdin and out  which is why we have to wait
     // before we can init readline
     const rl = readline.createInterface({
@@ -191,6 +194,7 @@ export default class extends Command {
       }
     }
     rl.close();
+    */
  
   }
 }
