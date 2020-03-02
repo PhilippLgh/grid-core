@@ -40,3 +40,7 @@ yarn-error.log
 docs/
 
 build
+plugins/workflows
+fixtures/
+**/*.spec.*
+.nyc_output
