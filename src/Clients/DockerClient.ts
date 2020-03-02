@@ -25,10 +25,11 @@ export default class DockerClient extends Client {
       throw new Error(`No path provided getFile()`)
     }
     const data = await this.container.inspect()
+    // TODO maybe even relative to entry point?
     const cwd = data.Config.WorkingDir
 
     const stream = await this.container.getArchive({
-      'path': filePath
+      'path': filePath.startsWith('/') ? filePath : path.join(cwd, filePath)
     })
     // @ts-ignore
     const buf =  await streamToBuffer(stream)
