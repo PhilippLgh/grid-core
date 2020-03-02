@@ -78,6 +78,10 @@ export class ClientManager {
     return this._config.cachePath as string
   }
 
+  get prefix() {
+    return this._config.prefix
+  }
+
   get description() {
     return this._config.about && this._config.about.description
   }
@@ -139,11 +143,14 @@ export class ClientManager {
 
     if (['mac'].includes(platform.toLowerCase())) {
       platform = 'darwin'
+    } 
+    else if (['win32'.includes(platform.toLowerCase())]) {
+      platform = 'windows'
     }
 
     // first, get the package, containing the binaries
     const pkg : IPackage | undefined = await this._packageManager.getPackage(this.repository, {
-      // prefix: 'geth-darwin', // server-side processed name- / path-filter. default: undefined
+      prefix: this.prefix, // server-side processed name- / path-filter. default: undefined
       filter: (release: IRelease) => {
         const _platform = extractPlatformFromString(release.fileName)
         return _platform !== undefined && (_platform === platform)
