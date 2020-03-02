@@ -45,9 +45,31 @@ module.exports = {
 }
 `
 
+const PACKAGE_JSON_TEMPLATE = {
+  name: '<unknown>',
+  version: '1.0.0',
+  description: 'This is the auto-generated test workflow.',
+  repository: '',
+  author: {
+    name: 'Foo Bar',
+    email: 'foo@bar.com'
+  },
+  license: 'MIT',
+  grid: {
+    version: GRID_VERSION, // developed on which grid version
+    type: PLUGIN_TYPES.WORKFLOW, // plugin type
+    tags: [...Object.values(WORKFLOW_TAGS)],
+  }, 
+  scripts: {
+    // TODO grid-core
+    start: 'grid-core workflow run . --flags', // flags: parses everything and passes through to workflow
+    release: 'grid-core workflow publish .' // cannot be named publish or clashes with `yarn publish`
+  }
+}
+
 export interface AuthorInfo {
-  name?: string;
-  email?: string;
+  name: string;
+  email: string;
 }
 
 export interface CreateWorkflowOptions {
@@ -58,6 +80,7 @@ export interface CreateWorkflowOptions {
 }
 
 export interface GetWorkflowOptions {
+  listener?: StateListener // download workflow events
 }
 
 export type PasswordCallback = () => Promise<string>
@@ -70,9 +93,9 @@ export interface PublishWorkflowOptions {
 
 export default class WorkflowManager {
 
-  pluginManager: PluginManager
+  pluginManager?: PluginManager
 
-  constructor(pluginManager: PluginManager) {
+  constructor(pluginManager?: PluginManager) {
     this.pluginManager = pluginManager
   }
   
@@ -96,27 +119,10 @@ export default class WorkflowManager {
     fs.symlinkSync(path.join(__dirname, '..'), path.join(NODE_MODULES, 'grid-core'))
     // TODO symlink in central grid repo for easy run by name
     const pkgJsonPath = path.join(projectPath, 'package.json')
-    const pkgJson = {
-      name,
-      version: '1.0.0',
-      description: 'This is the auto-generated test workflow.',
-      repository: '',
-      author: options.author || {
-        name: 'Foo Bar',
-        email: 'foo@bar.com'
-      },
-      license: options.license || 'MIT',
-      grid: {
-        version: GRID_VERSION, // developed on which grid version
-        type: PLUGIN_TYPES.WORKFLOW, // plugin type
-        tags: [...Object.values(WORKFLOW_TAGS)],
-      }, 
-      scripts: {
-        // TODO grid-core
-        start: 'grid workflow run . --flags', // flags: parses everything and passes through to workflow
-        release: 'grid workflow publish .' // cannot be named publish or clashes with `yarn publish`
-      }
-    }
+    const pkgJson = PACKAGE_JSON_TEMPLATE
+    pkgJson.name = name
+    pkgJson.license = options.license || pkgJson.license 
+    pkgJson.author = options.author || pkgJson.author 
     fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2))
     const indexPath = path.join(projectPath, 'index.js')
     fs.writeFileSync(indexPath, WORKFLOW_TEMPLATE(name))
@@ -124,6 +130,9 @@ export default class WorkflowManager {
   }
 
   async loadWorkflow(workflowPathOrPkg: string | IPackage) : Promise<Workflow> {
+    if (!this.pluginManager) {
+      throw new Error('Cannot load workflow: PluginManager not initialized')
+    }
     const plugin = await this.pluginManager.load(workflowPathOrPkg)
     const { pluginExports: config, pkgJson } = plugin
     if (pkgJson.grid.type === PLUGIN_TYPES.WORKFLOW) {
@@ -133,6 +142,9 @@ export default class WorkflowManager {
   }
 
   async getAllWorkflows() : Promise<Array<Workflow>> {
+    if (!this.pluginManager) {
+      throw new Error('Cannot list workflows: PluginManager not initialized')
+    }
     const plugins = await this.pluginManager.getAllPlugins()
     let workflows = []
     for (const plugin of plugins) {
@@ -144,10 +156,14 @@ export default class WorkflowManager {
     return workflows
   }
 
-  async getWorkflow(workflowSpec : string, options?: GetWorkflowOptions) : Promise<Workflow | undefined> {
+  async getWorkflow(workflowSpec : string, {
+    listener = () => {}
+  }: GetWorkflowOptions = {}) : Promise<Workflow | undefined> {
     // check if url or package query
     if (instanceOfPackageQuery(workflowSpec)) {
-      const pkg = await ethpkg.getPackage(workflowSpec)
+      const pkg = await ethpkg.getPackage(workflowSpec, {
+        listener
+      })
       if (!pkg) {
         console.log('Could not fetch workflow package')
         return
@@ -215,10 +231,23 @@ export default class WorkflowManager {
     const packageName = packageJson.name
     const packageVersion = packageJson.version
     const pkgFileName = `${packageName}-${packageVersion}`
-    // TODO write grid version in package json and maybe some other metadata
-    // TODO check that default author is changed
-    // TODO check that description is changed
-    // TODO check that not using all tags
+    if (packageJson.description === PACKAGE_JSON_TEMPLATE.description) {
+      throw new Error('Please set a workflow description in workflow package.json')
+    }
+    if (!packageJson.author || packageJson.author.name === PACKAGE_JSON_TEMPLATE.author.name) {
+      throw new Error('Please set the author field in workflow package.json')
+    }
+    if (!packageJson.grid) {
+      throw new Error('The workflow package.json should contain a grid key')
+    } else {
+      const { tags } = packageJson.grid
+      if (!tags) {
+        throw new Error('Please tag your workflow with the provided tags')
+      }
+      if (tags.length === Object.values(WORKFLOW_TAGS).length) {
+        throw new Error('Please use only relevant workflow tags in your package.json')
+      }
+    }
     let pkg = await ethpkg.createPackage(workflowPathFull, {
       fileName: pkgFileName,
       listener
