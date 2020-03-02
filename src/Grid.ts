@@ -288,30 +288,6 @@ export default class Grid extends EventEmitter {
 
   }
 
-  /*
-  async getBinaries(repository: string, nameOrOptions? : string | any) {
-    const name = typeof nameOrOptions === 'string' ? nameOrOptions : repository.split('/').pop()
-    if (!name) {
-      throw new Error('name not provided and could not be parsed from repository url: ' + repository)
-    }
-    const clientManager = await this.createClientManager({
-      name,
-      repository
-    })
-    // FIXME make optional and manage path globally
-    const CACHE_DIR = await appDataPath('cache', name)
-    // FIXME get platform from options
-    const platform = 'linux'
-    const pkg = await clientManager.getBinaries(CACHE_DIR, (newState: string) => {
-      logger.log('fetch client binaries', newState)
-    })
-    if (!pkg) {
-      throw new Error('Binaries could not be fetched')
-    }
-    return pkg
-  }
-  */
-
   /**
    * This will return an unlocked key if it can be found in keystore
    * If not it can create a new one
