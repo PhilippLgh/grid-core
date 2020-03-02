@@ -116,7 +116,12 @@ export default class WorkflowManager {
     const NODE_MODULES = path.join(projectPath, 'node_modules')
     fs.mkdirSync(NODE_MODULES)
     // create a symlink to parent for intellisense
-    fs.symlinkSync(path.join(__dirname, '..'), path.join(NODE_MODULES, 'grid-core'))
+    try {
+      // might fail with EPERM: operation not permitted on windows 10
+      fs.symlinkSync(path.join(__dirname, '..'), path.join(NODE_MODULES, 'grid-core'), 'dir')
+    } catch (error) {
+      console.log('WARNING: cannot create symlinks. Some operations might not work as expected')
+    }
     // TODO symlink in central grid repo for easy run by name
     const pkgJsonPath = path.join(projectPath, 'package.json')
     const pkgJson = PACKAGE_JSON_TEMPLATE
