@@ -3,6 +3,7 @@ import path from 'path'
 import { Command, command, param, Options, option, metadata } from 'clime'
 import Grid from '../../..'
 import { createCLIPrinter } from '../../cli-utils'
+import chalk from 'chalk'
 
 
 @command({
@@ -45,6 +46,22 @@ export default class extends Command {
       })
       console.log('done:')
       console.log(result.original)
+
+      const { releaseId } = result.original
+
+      const execCommand = `grid-core workflow run ${releaseId}`
+
+      console.log('\n')
+      console.log(chalk.cyan('='.repeat(execCommand.length + 5)))
+      console.log('✨Congratulations!✨')
+      console.log(`You can find your published workflow here:`)
+      console.log(chalk.bold('Run the workflow with:'))
+      console.log(chalk.cyan('='.repeat(execCommand.length + 5)))
+      console.log('\n')
+      console.log(chalk.bold(execCommand))
+      console.log('\n')
+      console.log(chalk.cyan('='.repeat(execCommand.length + 5)))
+      console.log('\n')
     } catch (error) {
       return printer.fail(error)
     }
