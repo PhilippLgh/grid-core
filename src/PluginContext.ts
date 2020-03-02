@@ -3,7 +3,6 @@ import Grid, { GridOptions } from './Grid'
 import { IPackage } from 'ethpkg'
 import * as WorkflowUtils from './Workflows/utils'
 import { ethers } from 'ethers'
-import { sleep } from './poc'
 import { FlagBuilder } from './Clients/Flags'
 import { EventEmitter } from 'events'
 
@@ -61,7 +60,6 @@ export const createContext = (grid: Grid, insecure = false) => {
         },
         // cwd: () => '/' // make memfs relative paths work: https://github.com/streamich/memfs/blob/master/docs/relative-paths.md
       },
-      sleep,
       console, // TODO remove console
       // TODO allow insecure mode where require is available
       require: (name: string) => {
