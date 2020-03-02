@@ -7,8 +7,6 @@ import { sleep } from './poc'
 import { FlagBuilder } from './Clients/Flags'
 import { EventEmitter } from 'events'
 
-const oneOf = (arg: any) => { return arg}
-const multiSelect = (arg: any) => { return arg}
 
 type PluginMetadata = {
   name: string;
