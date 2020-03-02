@@ -34,14 +34,13 @@ const findIpcPathInLogs = logs => {
       if (ipcPath.includes('\\\\')) {
         ipcPath = ipcPath.replace(/\\\\/g, '\\')
       }
-      console.log('Found IPC path: ', ipcPath)
+      // console.log('Found IPC path: ', ipcPath)
       return ipcPath
     }
   }
-  console.log('IPC path not found in logs', logs)
+  // console.log('IPC path not found in logs', logs)
   return null
 }
-const TYPE = require('grid-core/constants/plugin_types')
 
 module.exports = {
   type: 'client',
@@ -49,7 +48,7 @@ module.exports = {
   displayName: 'Geth',
   name: 'geth',
   repository: 'azure:gethstore',
-  type: TYPE.CLIENT,
+  type: 'type:client',
   modifiers: {
     version: ({ version }) =>
       version
