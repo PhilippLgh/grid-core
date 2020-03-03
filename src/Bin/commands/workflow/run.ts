@@ -56,8 +56,8 @@ export default class extends Command {
         printer.listener(newState, args)
         if (newState === PROCESS_EVENTS.RUN_WORKFLOW_STARTED) {
           const { workflow } = args
-          let descLength = workflow.description.length
-          decorationLength = Math.max(Math.min(50, descLength), 100)
+          let descLength = workflow.description.length 
+          decorationLength = Math.min(70, descLength + 10)
           console.log(`Starting workflow:
 ${'='.repeat(decorationLength)}
 Name: ${workflow.name}
