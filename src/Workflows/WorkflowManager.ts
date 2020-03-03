@@ -173,6 +173,20 @@ export default class WorkflowManager {
         console.log('Could not fetch workflow package')
         return
       }
+      listener(PROCESS_EVENTS.WORKFLOW_VERIFICATION_STARTED)
+      const verificationResult = await ethpkg.verifyPackage(pkg)
+      if (!verificationResult) {
+        throw new Error('Workflow verification failed')
+      }
+      const { signers, isTrusted, isValid } = verificationResult
+      if (!isValid) {
+        throw new Error('Workflow signature is invalid')
+      }
+      const gridAuthor = signers.find(signature => signature.address === '0x39830fed4b4b17fcdfa0830f9ab9ed8a1d0c11d9')
+      if (!gridAuthor) {
+        throw new Error('Package was not signed by Grid author. Execution of hosted packages not-signed by a Grid author is currently disabled')
+      }
+      listener(PROCESS_EVENTS.WORKFLOW_VERIFICATION_FINISHED, { signers })
       return this.loadWorkflow(pkg)
     }
 
@@ -195,6 +209,10 @@ export default class WorkflowManager {
     if (typeof workflow === 'string') {
       if (workflow.startsWith('0x')) {
         // expand project id to full ethpkg query
+        workflow = `${RegistryConfig.NAME}:${RegistryConfig.OWNER_QUERY_FRIENDLY}/${workflow}`
+      } 
+      let parts = workflow.split('/')
+      if (parts.length > 0 && parts[0].endsWith('.eth')) {
         workflow = `${RegistryConfig.NAME}:${RegistryConfig.OWNER_QUERY_FRIENDLY}/${workflow}`
       }
       workflow = await this.getWorkflow(workflow, {

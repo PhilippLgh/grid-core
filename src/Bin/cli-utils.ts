@@ -190,6 +190,14 @@ const createPrinter = () => {
     signPkgTask.succeed('Workflow package signed')
   })
 
+  .add(_.WORKFLOW_VERIFICATION_STARTED, () => {
+    const verifyWorkflowTask = ora('Verifying workflow ...').start()
+    return { verifyWorkflowTask }
+  })
+  .add(_.WORKFLOW_VERIFICATION_FINISHED, ({ verifyWorkflowTask, signers }) => {
+    verifyWorkflowTask.succeed(`Workflow has a valid signature and the author(s) is trusted: ${JSON.stringify(signers.map((s:any) => s.address))}`)
+  })
+
   .add(_.REPOSITORY_LOGIN_STARTED, () => {
     const loginTask = ora('Authenticating with repository').start()
     return { loginTask }
