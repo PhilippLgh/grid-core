@@ -4,6 +4,7 @@ import { Command, command, param, Options, option, metadata } from 'clime'
 import Grid from '../../..'
 import { createCLIPrinter } from '../../cli-utils'
 import chalk from 'chalk'
+import { getPasswordFromUser } from '../../interactive'
 
 
 @command({
@@ -35,7 +36,10 @@ export default class extends Command {
     try {
       const signingKey = await grid.getSigningKey({
         alias: 'grid',
-        password: 'test',
+        password: async () => {
+          const password = await getPasswordFromUser()
+          return password
+        },
         listener: printer.listener
       })
 
