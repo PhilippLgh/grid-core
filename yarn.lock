@@ -1424,10 +1424,10 @@ ethjs-util@0.1.6:
     is-hex-prefixed "1.0.0"
     strip-hex-prefix "1.0.0"
 
-ethpkg@^0.8.1:
-  version "0.8.1"
-  resolved "https://registry.yarnpkg.com/ethpkg/-/ethpkg-0.8.1.tgz#332c77f6bc1d7b08e4ab4c574a74bc16e2a21a0e"
-  integrity sha512-DdCztQMnaK+ghhln+AbLr2YwwUexH5L9W+5XsMwc6LGIoH1gCKClgJnXTtaCfdyn/uPfydI70bnhhU+1sI98OQ==
+ethpkg@^0.8.2:
+  version "0.8.2"
+  resolved "https://registry.yarnpkg.com/ethpkg/-/ethpkg-0.8.2.tgz#74c41405d4a7eb9e85fa17ede2f44e20a7712a1c"
+  integrity sha512-fMzSpNf7b+07BToiVghmmZ9zIbuUCrcKw07p7+7Ucgl1ltgwbqMO9GFCCLvNxAO+DggkIPKoaiyhTP6wws2VBw==
   dependencies:
     "@ianu/sdk" "^1.0.1"
     "@octokit/rest" "^16.35.0"
