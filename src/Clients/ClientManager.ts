@@ -144,7 +144,7 @@ export class ClientManager {
     if (['mac'].includes(platform.toLowerCase())) {
       platform = 'darwin'
     } 
-    else if (['win32'.includes(platform.toLowerCase())]) {
+    else if (['win32'].includes(platform.toLowerCase())) {
       platform = 'windows'
     }
 
