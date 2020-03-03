@@ -40,5 +40,6 @@ export default class extends Command {
     } catch (error) {
       console.log(chalk.red('Config creation failed: '+(error.message ? error.message : 'unknown error')))
     }
+    console.log(`Success! Config created at ${configPath}`)
   }
 }
