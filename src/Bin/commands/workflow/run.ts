@@ -51,24 +51,31 @@ export default class extends Command {
     const printer = await createCLIPrinter()
 
     let decorationLength = 50
-    await grid.workflowManager.runWorkflow(workflowSpec, flags, {
-      listener: (newState: string, args: any) => {
-        printer.listener(newState, args)
-        if (newState === PROCESS_EVENTS.RUN_WORKFLOW_STARTED) {
-          const { workflow } = args
-          let descLength = workflow.description.length 
-          decorationLength = Math.min(70, descLength + 10)
-          console.log(`Starting workflow:
+    try {
+      await grid.runWorkflow(workflowSpec, flags, {
+        listener: (newState: string, args: any) => {
+          printer.listener(newState, args)
+          if (newState === PROCESS_EVENTS.RUN_WORKFLOW_STARTED) {
+            const { workflow } = args
+            let descLength = workflow.description.length 
+            decorationLength = Math.min(70, descLength + 10)
+            console.log(
+`Starting workflow:
 ${'='.repeat(decorationLength)}
 Name: ${workflow.name}
 Version: ${workflow.version}
 Description: ${workflow.description}
 ${'='.repeat(decorationLength)}
 Output:
-              `)
+`
+            )
+          }
         }
-      }
-    })
+      })
+    } catch (error) {
+      printer.fail(`workflow run failed: ${error.stack}`)
+      process.exit(1)
+    }
     console.log('='.repeat(decorationLength))
   }
 }
