@@ -1,320 +1,315 @@
-import fs from 'fs'
-import path from 'path'
-import ethpkg, { instanceOfPackageQuery, IPackage } from 'ethpkg'
-import Workflow from './Workflow'
-import { isDirSync } from '../util'
 import PluginManager from '../PluginSystem/PluginManager'
-import { PLUGIN_TYPES, WORKFLOW_TAGS } from '../constants'
+import Workflow from './Workflow'
+import IRepository from '../IRepository'
+import WorkflowRepository from './WorkflowRepository'
 import { StateListener } from '../StateListener'
-import { PROCESS_EVENTS } from '../ProcessEvents'
+import { throwError, ERROR_WORKFLOW_NOT_FOUND } from '../Errors'
+import { WorkflowInfo, WorkflowInfoQuery, JobInfo } from './WorkflowInfo'
+import WorkflowRemoteRepository from './WorkflowRemoteRepository'
+import ethpkg, { IRelease, IPackage } from 'ethpkg'
 import { RegistryConfig } from '../Config'
-import { flattenFlags } from './utils'
+import { PLUGIN_TYPES } from '../constants'
+import { PROCESS_EVENTS } from '../ProcessEvents'
+import { Plugin } from '../PluginSystem/Plugin'
+import { StringMap } from '../BaseTypes'
+import { isDir, uuid } from '../util'
+import Job from './Job'
 
-const { version: GRID_VERSION } = require('../../package.json')
-
-const WORKFLOW_TEMPLATE = (name: string) => 
-`
-const { default: Grid, FlagBuilder, WorkflowUtils } = require('grid-core')
-const ethers = require('ethers')
-const { createLogger, prompt } = WorkflowUtils
-
-const logger = createLogger()
-const grid = new Grid({
-  logger
-})
-
-const run = async (config) => {
-  logger.log('>> hello workflow', config)
-  const client = await grid.getClient('geth')
-  const flags = await FlagBuilder.create(client).default().toProcessFlags()
-  const ipc = await grid.startClient(client, flags)
-  const clientVersion = await client.rpc('web3_clientVersion')
-  logger.log('>> Received client version via RPC:', clientVersion)
-  await grid.stopClient(client)
-}
-
-// lifecycle method:called before workflow stops
-const onStop = async () => {
-  // used to clean up
-  // await grid.stopClients()
-}
-
-module.exports = {
-  run,
-  onStop
-}
-`
-
-const PACKAGE_JSON_TEMPLATE = {
-  name: '<unknown>',
-  version: '1.0.0',
-  description: 'This is the auto-generated test workflow.',
-  repository: '',
-  author: {
-    name: 'Foo Bar',
-    email: 'foo@bar.com'
-  },
-  license: 'MIT',
-  grid: {
-    version: GRID_VERSION, // developed on which grid version
-    type: PLUGIN_TYPES.WORKFLOW, // plugin type
-    tags: [...Object.values(WORKFLOW_TAGS)],
-  }, 
-  scripts: {
-    // TODO grid-core
-    start: 'grid-core workflow run . --flags', // flags: parses everything and passes through to workflow
-    release: 'grid-core workflow publish .' // cannot be named publish or clashes with `yarn publish`
-  }
+interface IObservableOperation {
+  listener?: StateListener // download workflow events
 }
 
 export interface AuthorInfo {
   name: string;
   email: string;
 }
-
 export interface CreateWorkflowOptions {
   name: string;
   path?: string;
   author?: AuthorInfo;
   license?: string;
+  template?: string; // TODO support different templates
 }
 
-export interface GetWorkflowOptions {
-  listener?: StateListener // download workflow events
+export interface GetWorkflowOptions extends IObservableOperation {
 }
 
-export type PasswordCallback = () => Promise<string>
+export interface GetWorkflowsOptions extends IObservableOperation {
+  stateFilter?: string
+}
 
-export interface PublishWorkflowOptions {
+export interface RunWorkflowOptions extends GetWorkflowOptions {
+}
+
+export interface PublishWorkflowOptions extends IObservableOperation {
   repository?: string, // which repo should be used to publish
-  listener?: StateListener // upload progress events
   privateKeyOrSigner?: Buffer,
 }
 
+/**
+ * private methods return instances of class Workflow
+ * public methods should only return objects of type WorkflowInfo to avoid tight coupling
+ * all state should be manager by this class (start, stop of workflows) and the states of managed workflows should be queried
+ * if we allow consumers to directly manipulate workflow instances things get messy quite fast
+ */
 export default class WorkflowManager {
 
-  pluginManager?: PluginManager
+  private _workflows: Array<Workflow> = [] // workflow objects that can be executed
+  private _jobs: Array<Job> = [] // stores all executed workflows and their state
+  private _installedWorkflows: IRepository<IRelease, IPackage> // repository that manages persisted workflows
+  private _hostedWorkflows: WorkflowRemoteRepository // repository that manages hosted workflows
+  private _workflowsReady: Promise<boolean>
+  private _pluginManager: PluginManager
 
-  constructor(pluginManager?: PluginManager) {
-    this.pluginManager = pluginManager
-  }
-  
-  // TODO allow to create workflow from different template
-  async createWorkflow(options : CreateWorkflowOptions) : Promise<string> {
-    // TODO create .gitignore for keyfile
-    const { name, path: projectPath } = options
-    // TODO test for illegal chars
-    if (!name || !projectPath) {
-      throw new Error('Invalid arguments for workflow name or path')
-    }
-    if (fs.existsSync(projectPath)) {
-      throw new Error(`Workflow directory "${projectPath}" exists already!`)
-    }
-    fs.mkdirSync(projectPath, {
-      recursive: true
-    })
-    const NODE_MODULES = path.join(projectPath, 'node_modules')
-    fs.mkdirSync(NODE_MODULES)
-    // create a symlink to parent for intellisense
-    try {
-      // might fail with EPERM: operation not permitted on windows 10
-      fs.symlinkSync(path.join(__dirname, '..'), path.join(NODE_MODULES, 'grid-core'), 'dir')
-    } catch (error) {
-      console.log('WARNING: cannot create symlinks. Some operations might not work as expected')
-    }
-    // TODO symlink in central grid repo for easy run by name
-    const pkgJsonPath = path.join(projectPath, 'package.json')
-    const pkgJson = PACKAGE_JSON_TEMPLATE
-    pkgJson.name = name
-    pkgJson.license = options.license || pkgJson.license 
-    pkgJson.author = options.author || pkgJson.author 
-    fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2))
-    const indexPath = path.join(projectPath, 'index.js')
-    fs.writeFileSync(indexPath, WORKFLOW_TEMPLATE(name))
-    return projectPath
+  private static instance: WorkflowManager;
+
+  public constructor(
+    private _installedWorkflowsPath?: string
+  ) {
+    this._pluginManager = new PluginManager()
+    this._installedWorkflows = new WorkflowRepository(_installedWorkflowsPath)
+    this._hostedWorkflows = new WorkflowRemoteRepository()
+    this._workflowsReady = this._initInstalledWorkflows()
   }
 
-  async loadWorkflow(workflowPathOrPkg: string | IPackage) : Promise<Workflow> {
-    if (!this.pluginManager) {
-      throw new Error('Cannot load workflow: PluginManager not initialized')
+  public static getInstance(installedWorkflowsPath?: string) : WorkflowManager {
+    if (!WorkflowManager.instance) {
+      WorkflowManager.instance = new WorkflowManager(installedWorkflowsPath);
     }
-    const plugin = await this.pluginManager.load(workflowPathOrPkg)
-    const { pluginExports: config, pkgJson } = plugin
-    if (pkgJson.grid.type === PLUGIN_TYPES.WORKFLOW) {
-      return new Workflow(plugin)
-    }
-    throw new Error('Cannot construct workflow from plugin')
+    return WorkflowManager.instance;
   }
 
-  async getAllWorkflows() : Promise<Array<Workflow>> {
-    if (!this.pluginManager) {
-      throw new Error('Cannot list workflows: PluginManager not initialized')
+  private _expandSpecifier(workflowSpecifier: string): string {
+    if (workflowSpecifier.startsWith('0x')) {
+      // expand project id to full ethpkg query
+      workflowSpecifier = `${RegistryConfig.NAME}:${RegistryConfig.OWNER_QUERY_FRIENDLY}/${workflowSpecifier}`
     }
-    const plugins = await this.pluginManager.getAllPlugins()
-    let workflows = []
-    for (const plugin of plugins) {
-      const { pluginExports: config } = plugin
-      if (config.type === PLUGIN_TYPES.WORKFLOW) {
-        workflows.push(new Workflow(config))
-      }
+    let parts = workflowSpecifier.split('/')
+    if (parts.length > 0 && parts[0].endsWith('.eth')) {
+      workflowSpecifier = `${RegistryConfig.NAME}:${RegistryConfig.OWNER_QUERY_FRIENDLY}/${workflowSpecifier}`
     }
-    return workflows
+    return workflowSpecifier
   }
 
-  async getWorkflow(workflowSpec : string, {
+  /**
+   * Checks if the package is available as installed package and only tries to downloads
+   * a new one if the version is explicitly provided and does not match
+   * @param workflowSpecifier 
+   */
+  private async _getWorkflowPackage(workflowSpecifier: string | IRelease, {
     listener = () => {}
-  }: GetWorkflowOptions = {}) : Promise<Workflow | undefined> {
-    // check if url or package query
-    if (instanceOfPackageQuery(workflowSpec)) {
-      const pkg = await ethpkg.getPackage(workflowSpec, {
+  } : GetWorkflowsOptions = {}): Promise<any> {
+    let releaseInfo: IRelease | undefined = undefined
+    if (typeof workflowSpecifier === 'string') {
+      workflowSpecifier = this._expandSpecifier(workflowSpecifier)
+      releaseInfo = await ethpkg.resolve(workflowSpecifier, {
         listener
       })
-      if (!pkg) {
-        console.log('Could not fetch workflow package')
-        return
-      }
-      listener(PROCESS_EVENTS.WORKFLOW_VERIFICATION_STARTED)
-      const verificationResult = await ethpkg.verifyPackage(pkg)
-      if (!verificationResult) {
-        throw new Error('Workflow verification failed')
-      }
-      const { signers, isTrusted, isValid } = verificationResult
-      if (!isValid) {
-        throw new Error('Workflow signature is invalid')
-      }
-      const gridAuthor = signers.find(signature => signature.address === '0x39830fed4b4b17fcdfa0830f9ab9ed8a1d0c11d9')
-      if (!gridAuthor) {
-        throw new Error('Package was not signed by Grid author. Execution of hosted packages not-signed by a Grid author is currently disabled')
-      }
-      listener(PROCESS_EVENTS.WORKFLOW_VERIFICATION_FINISHED, { signers })
-      return this.loadWorkflow(pkg)
+    } else {
+      releaseInfo = workflowSpecifier
     }
 
-    // check if path
-    const workflowPath = path.resolve(process. cwd(), workflowSpec)
-    if (isDirSync(workflowPath)) {
-      return  await this.loadWorkflow(workflowPath)
-    } 
+    if (!releaseInfo) {
+      throw new Error('Workflow not found')
+    }
 
-    // try to handle as name
-    const workflowName = workflowSpec
-    const workflows = await this.getAllWorkflows()
-    const workflow = workflows.find(w => w.name === workflowName)
+    const isInstalled = await this._installedWorkflows?.has(releaseInfo)
+    const workflowPkg = isInstalled ? await this._installedWorkflows?.get(releaseInfo) : await this._hostedWorkflows.get(releaseInfo)
+
+    return {
+      workflowPkg,
+      isInstalled
+    }
+  }
+
+  /**
+   * Initializes a packaged workflow or workflow directory so that it can be executed
+   * @param workflowPathOrPkg 
+   */
+  private async _initWorkflow(workflowPkg: string | IPackage, isInstalled: boolean): Promise<Workflow> {
+    const plugin = await this._pluginManager?.load(workflowPkg) as Plugin
+    if (!plugin) {
+      throw new Error(`Workflow plugin could not be loaded: ${typeof workflowPkg === 'string' ? workflowPkg : workflowPkg.fileName}`)
+    }
+    const { pluginExports: config, metadata } = plugin
+    if (metadata.grid.type !== PLUGIN_TYPES.WORKFLOW) {
+      throw new Error(`Plugin is not a workflow"`)
+    }
+
+    const workflow = new Workflow(plugin, isInstalled)
+    this._workflows.push(workflow)
     return workflow
   }
 
-  async runWorkflow(workflow?: Workflow | string, flags: any = {}, {
+  private async _initInstalledWorkflows(): Promise<boolean> {
+    // avoid multiple inits
+    if (this._workflowsReady) {
+      return true
+    }
+    // await this.installWorkflow('grid.philipplgh.eth/hello-grid')
+    const installedWorkflowPackages = await this._installedWorkflows.getAll()
+    for (const workflowPackage of installedWorkflowPackages) {
+      const workflow = await this._initWorkflow(workflowPackage, true)
+    }
+    return true
+  }
+
+  private async _getWorkflow(workflowSpecifier: string, {
     listener = () => {}
-  } : any = {}) {
-    if (typeof workflow === 'string') {
-      if (workflow.startsWith('0x')) {
-        // expand project id to full ethpkg query
-        workflow = `${RegistryConfig.NAME}:${RegistryConfig.OWNER_QUERY_FRIENDLY}/${workflow}`
-      } 
-      let parts = workflow.split('/')
-      if (parts.length > 0 && parts[0].endsWith('.eth')) {
-        workflow = `${RegistryConfig.NAME}:${RegistryConfig.OWNER_QUERY_FRIENDLY}/${workflow}`
-      }
-      workflow = await this.getWorkflow(workflow, {
+  }: GetWorkflowOptions = {}): Promise<Workflow> {
+    if (!this._installedWorkflowsPath) {
+      throw new Error('Cannot install workflow in directory: directory is undefined')
+    }
+
+    let workflow
+    if (await isDir(workflowSpecifier)) {
+      workflow = await this._initWorkflow(workflowSpecifier, true)
+    } else {
+      const { workflowPkg, isInstalled } = await this._getWorkflowPackage(workflowSpecifier, {
         listener
       })
+      if (!workflowPkg) {
+        throw new Error('Failed to retrieve workflow package')
+      }
+      workflow = await this._initWorkflow(workflowPkg, isInstalled)
+    }
+
+    return workflow
+  }
+
+  private async _getWorkflows() {
+    await this._workflowsReady
+    return this._workflows
+  }
+
+  private async _getWorkflowById(workflowId: string): Promise<Workflow | undefined> {
+    const workflows = await this._getWorkflows()
+    return workflows.find(workflow => workflow.id === workflowId)
+  }
+
+  public async createWorkflowProject() {
+
+  }
+
+  public async addWorkflow(workflowSource: string, metadata: StringMap) : Promise<WorkflowInfo> {
+    const plugin = await this._pluginManager.loadPlugin(workflowSource, metadata)
+    const isInstalled = false
+    const workflow = new Workflow(plugin, isInstalled)
+    this._workflows.push(workflow)
+    return workflow.info()
+  }
+
+  /**
+   * 
+   * @param query 
+   */
+  public async searchWorkflows(query: string): Promise<Array<WorkflowInfo>> {
+    return this._hostedWorkflows.searchWorkflows(query)
+  }
+
+  public async installWorkflow(workflowSpecifier: string | IRelease): Promise<WorkflowInfo> {
+    console.log('install workflow!')
+    const { workflowPkg, isInstalled } = await this._getWorkflowPackage(workflowSpecifier)
+    if (!workflowPkg) {
+      throw new Error('Failed to retrieve workflow package')
+    }
+    // ignore if package is already installed
+    const wasAdded = await this._installedWorkflows?.add(workflowPkg)
+    if (!wasAdded) {
+      throw new Error('Could not install workflow')
+    }
+    const workflow = await this._initWorkflow(workflowPkg, isInstalled)
+    return workflow.info()
+  }
+
+  /**
+   * Returns a list of all workflows that match the query template
+   * e.g. with info = { isInstalled: true } will return only workflows where isInstalled is set to true
+   */
+  public async getWorkflows(query?: WorkflowInfoQuery): Promise<Array<WorkflowInfo>> {
+    const workflows = await this._getWorkflows()
+    const workflowInfo = [
+      ...workflows.map(workflow => workflow.info()), 
+      ...this._jobs.map(job => job.info())
+    ]
+    return workflowInfo.filter((workflowInfo: WorkflowInfo) => {
+      if (!query) return true
+      let match = true
+      for(const key in query) {
+        // @ts-ignore
+        match = match && (workflowInfo[key] === query[key])
+      }
+      return match
+    })
+  }
+
+  public async getInstalledWorkflows(info?: WorkflowInfoQuery) {
+    return this.getWorkflows({ 
+      isInstalled: true
+    })
+  }
+
+  /**
+   * Downloads (if necessary) and initializes a workflow so that it can be executed
+   * @param workflowSpecifier 
+   */
+  public async getWorkflow(workflowSpecifier: string, options?: GetWorkflowOptions): Promise<WorkflowInfo> {
+    const workflow = await this._getWorkflow(workflowSpecifier, options)
+    return workflow.info()
+  }
+
+  public async getJobs() : Promise<Array<JobInfo>> {
+    return [...this._jobs].map(job => job.info())
+  }
+
+  /**
+   * The workflow execution creates a "job" which is basically metadata about the workflows
+   * that is being run
+   * @param workflowId 
+   * @param flags 
+   * @param param2 
+   */
+  public async runWorkflow(workflowIdOrSpecifier: string, flags: Object = {}, {
+    listener = () => { }
+  }: RunWorkflowOptions = {}): Promise<any> {
+    let workflow = await this._getWorkflowById(workflowIdOrSpecifier)
+    if(!workflow) {
+      workflow = await this._getWorkflow(workflowIdOrSpecifier, { listener })
     }
     if (!workflow) {
-      throw new Error('Workflow not found')
+      return throwError(ERROR_WORKFLOW_NOT_FOUND)
     }
-    listener(PROCESS_EVENTS.RUN_WORKFLOW_STARTED, { workflow })
-    let config = {}
+
+    // FIXME invalid config
+    listener(PROCESS_EVENTS.RUN_WORKFLOW_STARTED, { workflow, config: {} })
+
+    let result
     try {
-      config = flattenFlags(flags, workflow.pluginExports.run.config || {})
-    } catch (error) {}
-    const result = await workflow.run(config)
+      const job = await workflow.run(flags)
+      this._jobs.push(job)
+      result = await job.whenFinished()
+      console.log('result', result)
+    } catch (error) {
+      // console.log('error in workflow', error)
+      throw error
+      // TODO handle workflow error
+      // workflow.setState(WORKFLOW_STATE.CRASHED)
+      // workflow.setError(error)
+    }
     listener(PROCESS_EVENTS.RUN_WORKFLOW_FINISHED, { workflow })
     return result
   }
 
-  async validateWorkflowPackage(workflowPath: string) {}
+  public async scheduleWorkflow(remote = false) {
+    throw new Error('not implemented')
+  }
 
-  async publishWorkflow(workflowPath: string, {
+  public async publishWorkflow(workflowPath: string, {
     repository = RegistryConfig.NAME,
-    listener = () => {},
+    listener = () => { },
     privateKeyOrSigner
   }: PublishWorkflowOptions = {}) {
-
-    if (!privateKeyOrSigner) {
-      throw new Error('No private key or signer provided')
-    }
-
-    const workflowPathFull = path.resolve(workflowPath)
-    if (!isDirSync(workflowPath)) {
-      throw new Error('Workflow directory not found: '+workflowPathFull)
-    }
-
-    const packageJson = JSON.parse(fs.readFileSync(path.join(workflowPathFull, 'package.json'), 'utf8'))
-    const workflowName = packageJson.name
-    const packageName = packageJson.name
-    const packageVersion = packageJson.version
-    const pkgFileName = `${packageName}-${packageVersion}`
-    if (packageJson.description === PACKAGE_JSON_TEMPLATE.description) {
-      throw new Error('Please set a workflow description in workflow package.json')
-    }
-    if (!packageJson.author || packageJson.author.name === PACKAGE_JSON_TEMPLATE.author.name) {
-      throw new Error('Please set the author field in workflow package.json')
-    }
-    if (!packageJson.grid) {
-      throw new Error('The workflow package.json should contain a grid key')
-    } else {
-      const { tags } = packageJson.grid
-      if (!tags) {
-        throw new Error('Please tag your workflow with the provided tags')
-      }
-      if (tags.length === Object.values(WORKFLOW_TAGS).length) {
-        throw new Error('Please use only relevant workflow tags in your package.json')
-      }
-    }
-    let pkg = await ethpkg.createPackage(workflowPathFull, {
-      fileName: pkgFileName,
-      listener
-    })
-
-    // test pkg
-    // TODO listener(PROCESS_EVENTS.PACKAGE_VALIDATION_STARTED)
-    const entries = await pkg.getEntries()
-    const requiredFiles = entries.filter(e => ['index.js', 'package.json'].includes(path.basename(e.relativePath)))
-    if (requiredFiles.length !== 2) {
-      throw new Error('Workflow seems to be corrupted - files are missing')
-    }
-
-    listener(PROCESS_EVENTS.SIGN_WORKFLOW_PKG_STARTED)
-    pkg = await ethpkg.signPackage(pkg, privateKeyOrSigner, {
-      listener
-    })
-    listener(PROCESS_EVENTS.SIGN_WORKFLOW_PKG_FINISHED)
-
-    /*
-    const destPath = path.join(workflowPathFull, '..', pkgFileName)
-    console.log('Write pkg to', destPath)
-    await pkg.writePackage(destPath, {
-      overwrite: true
-    })
-    */
-
-    // NOTE package.json validation is handled by ethpkg
-
-    listener(PROCESS_EVENTS.UPLOAD_STARTED, { name: workflowName, repo: repository })
-    const result = await ethpkg.publishPackage(pkg, {
-      repository: {
-        name: repository,
-        owner: RegistryConfig.OWNER,
-        project: ``
-      },
-      listener,
-      credentials: {
-        privateKey: privateKeyOrSigner
-      }
-    })
-    listener(PROCESS_EVENTS.UPLOAD_FINISHED, { name: workflowName, repo: repository })
-
-    return result
+    // this._hostedWorkflows.publish()
   }
 
 }
